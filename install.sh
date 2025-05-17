@@ -52,8 +52,8 @@ fetch_file "mvin321/IP2Regex-Shell" "ip2regex.sh" "$TGT_DIR"
 fetch_file "mvin321/ExecLock-Shell" "exec-lock.sh" "$JFFS_DIR"
 
 #Fetch configuration files
-for f in $(curl -s "https://api.github.com/repos/$GIT_REPO/contents/cfg?ref=$BRANCH" | jq -r '.[].name'); do
-    fetch_file "${f}" "$CFG_DIR"
+for f in $(curl -s "https://api.github.com/repos/$CCM_REPO/contents/cfg?ref=$BRANCH" | jq -r '.[].name'); do
+    fetch_file "$CCM_REPO" "${f}" "$CFG_DIR"
 done
 
 #Make scripts executable
