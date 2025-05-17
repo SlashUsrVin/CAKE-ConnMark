@@ -22,7 +22,7 @@ TGT_DIR="/jffs/scripts/cake-connmark"
 CFG_DIR="$TGT_DIR/cfg"
 
 #Function to fetch scripts from github
-function fetch_file() {
+fetch_file() {
     GIT_REPO="$1"
     GIT_FILE_PATH="$2"
     LOC_INSTALL_DIR="$3"
@@ -30,7 +30,7 @@ function fetch_file() {
     curl -fsSL "https://raw.githubusercontent.com/$GIT_REPO/$BRANCH/$GIT_FILE_PATH" -o "$LOC_INSTALL_DIR/$(basename $GIT_FILE_PATH)"
 }
 
-function backup_file() {
+backup_file() {
     sh_full_path="$1"
     pscript_n=$(basename "$sh_full_path")
     bk_pre_name=$(date +"%Y%m%d%H%M%S")

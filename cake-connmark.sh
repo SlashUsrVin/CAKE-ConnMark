@@ -66,7 +66,7 @@ ip_to_regex_range () {
     regx_ip_rng="$DIR_CONN/ip2regex.sh"
 
     #Check if notation exists, if so, convert to ip ranges and generate regex
-    if [ ! -z "$cidr" ]; then
+    if [ -n "$cidr" ]; then
         ip_R=$(sh "$ipcalc" "$c_ip") #convert notation to IP ranges
         rgx_ip=$(sh "$regx_ip_rng" $ip_R) #convert IP range to regular expression
     else
@@ -94,7 +94,7 @@ filter_port_range () {
             p1="$1"
             p2="$2"
 
-            if [ ! -z "$p2" ]; then
+            if [ -n "$p2" ]; then
                 if [ "$dest_port" -ge "$p1" ] && [ "$dest_port" -le "$p2" ]; then
                     port_match="1"
                 fi
@@ -180,7 +180,7 @@ prioritize_conn () {
                     i_p1="$1"
                     i_p2="$2"
 
-                    if [ ! -z "$i_p2" ]; then
+                    if [ -n "$i_p2" ]; then
                         #consolidate port ranges, this will be evaluated separately.
                         if [ -z "$conn_include_rport" ]; then
                             conn_include_rport="${i}"
@@ -198,7 +198,7 @@ prioritize_conn () {
                     x_p1="$1"
                     x_p2="$2"
 
-                    if [ ! -z "$x_p2" ]; then
+                    if [ -n "$x_p2" ]; then
                         #consolidate port ranges, this will be evaluated separately.
                         if [ -z "$conn_exclude_rport" ]; then
                             conn_exclude_rport="${i}"
@@ -248,19 +248,19 @@ prioritize_conn () {
     
     #If port ranges are present in !PORT parameter, they will be filtered here.
     echo "conn_exclude_rport=$conn_exclude_rport"
-    if [ ! -z "$conn_exclude_rport" ] && [ ! -z "$connt" ]; then
+    if [ -n "$conn_exclude_rport" ] && [ -n "$connt" ]; then
         connt=$(filter_port_range "E" "$conn_exclude_rport" "$connt")
         echo "filtered-exclude-connt=$connt"
     fi
     
     #If port ranges are present in PORT parameter, they will be filtered here.
     echo "conn_include_rport=$conn_include_rport"
-    if [ ! -z "$conn_include_rport" ] && [ ! -z "$connt" ]; then
+    if [ -n "$conn_include_rport" ] && [ -n "$connt" ]; then
         connt=$(filter_port_range "I" "$conn_include_rport" "$connt")
         echo "filtered-include-connt=$connt"
     fi
 
-    if [ ! -z "$connt" ]; then
+    if [ -n "$connt" ]; then
         build_ipt "$connt" "$cf_dscp" "$ipt_exclude_chain"
     fi
 }
@@ -288,7 +288,7 @@ find_insert_seq () {
 
         rule_fetch=$(echo "$chain_rules" | grep "${hex}")
 
-        if [ ! -z "$rule_fetch" ]; then
+        if [ -n "$rule_fetch" ]; then
 
             if [ "$chck_lvl" -eq 0 ]; then
                 seq=$(echo "$rule_fetch" | awk 'END {print $1}') #insert at the bottom              
@@ -318,11 +318,11 @@ build_ipt () {
     exclude_chains="$3"
 
     chk_chain=$(echo "$exclude_chains" | grep -ioE "FORWARD")
-    if [ ! -z "$chk_chain" ]; then
+    if [ -n "$chk_chain" ]; then
         include_forw="1"
     fi
     chk_chain=$(echo "$exclude_chains" | grep -ioE "POSTROUTING")
-    if [ ! -z "$chk_chain" ]; then
+    if [ -n "$chk_chain" ]; then
         include_post="1"
     fi
 
@@ -399,7 +399,7 @@ echo "$iptrules" | while read -r rule; do
     strippedR=$(echo ${rule} | awk '{$1=""; sub(/^ /, ""); print}') #removed -A at the start of the string and remove space added by awk
     activerule=$(echo "$currconns" | grep -- "${strippedR}")
 
-    if [[ -z "$activerule" && ! -z "$strippedR" ]]; then
+    if [[ -z "$activerule" && -n "$strippedR" ]]; then
         iptables -t mangle -D ${strippedR}
         printf "\nDELETED --> $strippedR"
     fi
