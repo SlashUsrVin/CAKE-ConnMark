@@ -27,7 +27,7 @@ function fetch_file() {
     GIT_FILE_PATH="$2"
     LOC_INSTALL_DIR="$3"
 
-    curl -fsSL "https://raw.githubusercontent.com/$GIT_REPO/$BRANCH/$GIT_FILE_PATH" -o "$LOC_INSTALL_DIR/$(basename $FILE_PATH)"
+    curl -fsSL "https://raw.githubusercontent.com/$GIT_REPO/$BRANCH/$GIT_FILE_PATH" -o "$LOC_INSTALL_DIR/$(basename $GIT_FILE_PATH)"
 }
 
 function backup_file() {
@@ -44,6 +44,8 @@ rm -rf "$TGT_DIR"
 
 #Re-create directory
 mkdir -p "$TGT_DIR" 
+mkdir -p "$CFG_DIR"
+mkdir -p "$TGT_DIR/tmp"
 
 #Fetch scripts from github
 fetch_file "$CCM_REPO" "cake-connmark.sh" "$TGT_DIR"
@@ -53,13 +55,13 @@ fetch_file "mvin321/ExecLock-Shell" "exec-lock.sh" "$JFFS_DIR"
 
 #Fetch configuration files
 for f in $(curl -s "https://api.github.com/repos/$CCM_REPO/contents/cfg?ref=$BRANCH" | jq -r '.[].name'); do
-    fetch_file "$CCM_REPO" "${f}" "$CFG_DIR"
+    fetch_file "$CCM_REPO" "cfg/${f}" "$CFG_DIR"
 done
 
 #Make scripts executable
 chmod +x $TGT_DIR/cake-connmark.sh
 chmod +x $TGT_DIR/ipcalc.sh
-chmod +x $TGT_DIR/regx_ip_rng.sh
+chmod +x $TGT_DIR/ip2regex.sh
 
 #Convert line breaks to unix line breaks
 dos2unix $TGT_DIR/cake-connmark.sh
