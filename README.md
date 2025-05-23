@@ -21,35 +21,38 @@ curl -fsSL "https://raw.githubusercontent.com/mvin321/CAKE-ConnMark/main/install
   
 ### __CONFIGURATION FILES:__  
 This scrip comes with sample configurations for gaming and video streaming, which you’ll need to customize by adding your own device IPs (e.g., gaming PCs, smart TVs, Fire Sticks). Once configured, it tags traffic so latency-sensitive applications like online games or video playback are prioritized.  
-1. You must modify the configuration files to reflect your device IPs on SRCIP lines here (also check example below): /jffs/scripts/cake-connmark/cfg
-2. You can create your own config files and place it in the same directory.
-
+1. You must modify the configuration files to reflect your device IPs on SRCIP lines here (also check example below): /jffs/scripts/cake-connmark/cfg  
+2. You can create your own config files and place it in the same directory.  
+  
 #### __Supported Config Parameters:__  
 _CAKE-ConnMark will only read the following parameters from the *.cfg files.  
-DO NOT include inline comments with these parameters. Comments on a separate line is fine._
-| Parameter | Description                                                              | Example/Usage                          |
-| --------- | ------------------------------------------------------------------------ | -------------------------------------- |
-| __PROTOCOL__  [_udp/tcp/icmp_] | Protocol to look for in conntrack. Can set 1 or more (separate with space ) protocol                                 | PROTOCOL udp                           |
-| __SRCIP__ [_ip address_] | Picks active connection from conntrack with this Source IP. Multiple ips can be set separated by a single space or a separate SRCIP line. Can set CIDR i.e 192.168.1.1/24 | SRCIP 192.168.2.10 192.168.2.11  |
-| __DSTIP__ [ip address] | Picks active connection from conntrack with this Destination IP. Multiple ips can be set separated by a single space or a separate SRCIP line. Can set CIDR i.e 192.168.1.1/24 | DSTIP 8.8.8.8 8.8.4.4 |
-| __PORT__ [_port number_] | This is destination port (remote port) (the one used in port forwarding). Can be set for multiple protocol (separate with 1 space) | PROTOCOL udp |
-| __DSCP__ [_hex value_] | Check table below for the list of supported dscp value. Priority to set when creating iptables rules | DSCP 0x2e |
-| __!SRCIP__ [_ip address_] | Opposite of SRCIP, exclude connection with this source IP. Usage is the same as SRCIP just put ! at the beginning | !SRCIP 192.168.2.10 |
-| __!DSTIP__ [_ip address_] | Opposite of DSTIP, exclude connection with this source IP. Usage is the same as DSTIP just put ! at the beginning | !DSTIP 8.8.8.8 8.8.4.4 |
-| __!PORT__ [_port number_] | Opposite of PORT, exclude connection with this destination port. Usage is the same as PORT just put ! at the beginning | !PROTOCOL udp |
-| __!CHAIN__ [_FORWARD/POSTROUTING_] | Normally both outgoing and incoming traffic will be prioritized. In case you only need 1 way, you can exclude one here. i.e !CHAIN POSTROUTING if you only want the incoming packets prioritized. (good for streaming devices) | !CHAIN POSTROUTING |
-
+DO NOT include inline comments with these parameters. Comments on a separate line is fine._  
+| Parameter | Description                                                              | Example/Usage                          |  
+| --------- | ------------------------------------------------------------------------ | -------------------------------------- |  
+| __PROTOCOL__  [_udp/tcp/icmp_] | Protocol to look for in conntrack. Can set 1 or more (separate with space ) protocol                                 | PROTOCOL udp                           |  
+| __SRCIP__ [_ip address_] | Picks active connection from conntrack with this Source IP. Multiple ips can be set separated by a single space or a separate SRCIP line. Can set CIDR i.e 192.168.1.1/24 | SRCIP 192.168.2.10 192.168.2.11  |  
+| __DSTIP__ [ip address] | Picks active connection from conntrack with this Destination IP. Multiple ips can be set separated by a single space or a separate SRCIP line. Can set CIDR i.e 192.168.1.1/24 | DSTIP 8.8.8.8 8.8.4.4 |  
+| __PORT__ [_port number_] | This is destination port (remote port) (the one used in port forwarding). Can be set for multiple protocol (separate with 1 space) | PROTOCOL udp |  
+| __DSCP__ [_hex value_] | Check table below for the list of supported dscp value. Priority to set when creating iptables rules | DSCP 0x2e |  
+| __!SRCIP__ [_ip address_] | Opposite of SRCIP, exclude connection with this source IP. Usage is the same as SRCIP just put ! at the beginning | !SRCIP 192.168.2.10 |  
+| __!DSTIP__ [_ip address_] | Opposite of DSTIP, exclude connection with this source IP. Usage is the same as DSTIP just put ! at the beginning | !DSTIP 8.8.8.8 8.8.4.4 |  
+| __!PORT__ [_port number_] | Opposite of PORT, exclude connection with this destination port. Usage is the same as PORT just put ! at the beginning | !PROTOCOL udp |  
+| __!CHAIN__ [_FORWARD/POSTROUTING_] | Normally both outgoing and incoming traffic will be prioritized. In case you only need 1 way, you can exclude one here. i.e !CHAIN POSTROUTING if you only want the incoming packets prioritized. (good for streaming devices) | !CHAIN POSTROUTING |  
+  
 #### Supported DSCP Classes by CAKE-ConnMark (diffserv4):  
-_Install CAKE-SpeedSync to enable diffserv4: https://github.com/mvin321/CAKE-SpeedSync_
-| Priority | DSCP Name | Decimal | Hex    | CAKE Class  |
-| -------- | --------- | ------- | ------ | ----------- |
-| Highest  | EF        | 46      | 0x2e   | Voice       |
-| High     | AF41      | 34      | 0x22   | Video       |
-|          | AF42      | 36      | 0x24   | Video       |
-|          | AF43      | 38      | 0x26   | Video       |
-| Normal   | CS0       | 0       | 0x00   | Best Effort |
-| Lowest   | CS1       | 8       | 0x08   | Bulk        |
-
+_Install CAKE-SpeedSync to enable diffserv4: https://github.com/mvin321/CAKE-SpeedSync_  
+| Priority | DSCP Name | Decimal | Hex    | CAKE Class  |  
+| -------- | --------- | ------- | ------ | ----------- |  
+| Highest  | EF        | 46      | 0x2e   | Voice       |  
+|          | VA        | 44      | 0x2c   | Voice       |  
+|          | CS5       | 40      | 0x28   | Voice       |  
+| High     | AF41      | 34      | 0x22   | Video       |  
+|          | AF42      | 36      | 0x24   | Video       |  
+|          | AF43      | 38      | 0x26   | Video       |  
+|          | CS4       | 32      | 0x20   | Video       |  
+| Normal   | CS0       | 0       | 0x00   | Best Effort |  
+| Lowest   | CS1       | 8       | 0x08   | Bulk        |  
+  
 ### Example Configurations  
 #### Example 1: Streaming (i.e for Apple Tv, FireStick, Roku devices)  
     # Target protocol are both tcp and udp since video streaming can use either
@@ -67,7 +70,7 @@ _Install CAKE-SpeedSync to enable diffserv4: https://github.com/mvin321/CAKE-Spe
     
     # EXCLUDE CHAIN - Exclude POSTROUTING chain. Only prioritize incoming traffic (use FORWARD chain only)  
     !CHAIN POSTROUTING  
-
+  
 #### Example 2: Gaming (i.e for PCs, Nintendo, Xbox, PlayStation, etc)  
     # Online games uses udp protocol for real-time game communication  
     PROTOCOL udp  
