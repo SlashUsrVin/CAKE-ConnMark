@@ -17,10 +17,9 @@ This script reads active connections from conntrack and dynamically generates ip
 ```markdown
 curl -fsSL "https://raw.githubusercontent.com/SlashUsrVin/CAKE-ConnMark/main/install.sh" | sh  
 ```
-7. Script runs immediately after installation.  
   
 ### __CONFIGURATION FILES:__  
-This scrip comes with sample configurations for gaming and video streaming, which you’ll need to customize by adding your own device IPs (e.g., gaming PCs, smart TVs, Fire Sticks). Once configured, it tags traffic so latency-sensitive applications like online games or video playback are prioritized.  
+This script comes with sample configurations for gaming and video streaming, which you’ll need to customize by adding your own device IPs (e.g., gaming PCs, smart TVs, Fire Sticks). Once configured, it tags traffic so latency-sensitive applications like online games or video playback are prioritized.  
 1. You must modify the configuration files to reflect your device IPs on SRCIP lines here (also check example below): /jffs/scripts/cake-connmark/cfg  
 2. You can create your own config files and place it in the same directory.  
   
@@ -34,10 +33,10 @@ DO NOT include inline comments with these parameters. Comments on a separate lin
 | __DSTIP__ [ip address] | Picks active connection from conntrack with this Destination IP. Multiple ips can be set separated by a single space or a separate SRCIP line. Can set CIDR i.e 192.168.1.1/24 | DSTIP 8.8.8.8 8.8.4.4 |  
 | __PORT__ [_port number_] | This is destination port (remote port) (the one used in port forwarding). Can be set for multiple protocol (separate with 1 space) | PROTOCOL udp |  
 | __DSCP__ [_hex value_] | Check table below for the list of supported dscp value. Priority to set when creating iptables rules | DSCP 0x2e |  
-| __!SRCIP__ [_ip address_] | Opposite of SRCIP, exclude connection with this source IP. Usage is the same as SRCIP just put ! at the beginning | !SRCIP 192.168.2.10 |  
-| __!DSTIP__ [_ip address_] | Opposite of DSTIP, exclude connection with this source IP. Usage is the same as DSTIP just put ! at the beginning | !DSTIP 8.8.8.8 8.8.4.4 |  
+| __!SRCIP__ [_ip address_] | Opposite of SRCIP, exclude connection with this Source IP. Usage is the same as SRCIP just put ! at the beginning | !SRCIP 192.168.2.10 |  
+| __!DSTIP__ [_ip address_] | Opposite of DSTIP, exclude connection with this Destination IP. Usage is the same as DSTIP just put ! at the beginning | !DSTIP 8.8.8.8 8.8.4.4 |  
 | __!PORT__ [_port number_] | Opposite of PORT, exclude connection with this destination port. Usage is the same as PORT just put ! at the beginning | !PROTOCOL udp |  
-| __!CHAIN__ [_FORWARD/POSTROUTING_] | Normally both outgoing and incoming traffic will be prioritized. In case you only need 1 way, you can exclude one here. i.e !CHAIN POSTROUTING if you only want the incoming packets prioritized. (good for streaming devices) | !CHAIN POSTROUTING |  
+| __!CHAIN__ [_FORWARD/POSTROUTING_] | Normally both outgoing and incoming traffic will be prioritized. In case you only need 1 direction, you can exclude one here. i.e !CHAIN POSTROUTING if you only want the incoming packets prioritized. (good for streaming devices) | !CHAIN POSTROUTING |  
   
 #### Supported DSCP Classes by CAKE-ConnMark (diffserv4):  
 _Install CAKE-SpeedSync to enable diffserv4: https://github.com/SlashUsrVin/CAKE-SpeedSync_  
