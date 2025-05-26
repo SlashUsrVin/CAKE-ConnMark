@@ -5,7 +5,7 @@ This script reads active connections from conntrack and dynamically generates ip
 ### __DEPENDENCIES:__  
 1. ASUS Router running on the latest MERLIN firmware. (https://sourceforge.net/projects/asuswrt-merlin/files/)  
 2. Must have custom script support and built in CAKE QoS feature.  
-3. CAKE QoS must be enabled in diffserv4. Works well with CAKE-SpeedSync (enables diffserv4) - Install first here: https://github.com/mvin321/CAKE-SpeedSync  
+3. CAKE QoS must be enabled in diffserv4. Works well with CAKE-SpeedSync (enables diffserv4) - Install first here: https://github.com/SlashUsrVin/CAKE-SpeedSync  
   
 ### __INSTALLATION:__  
 1. Ensure router is running on MERLIN firmware (check DEPENDENCIES section above)  
@@ -15,7 +15,7 @@ This script reads active connections from conntrack and dynamically generates ip
 5. Open CMD or PowerShell and connect to your router via SSH (example: ssh admin@192.168.1.1)  
 6. Run syntax to install:            
 ```markdown
-curl -fsSL "https://raw.githubusercontent.com/mvin321/CAKE-ConnMark/main/install.sh" | sh  
+curl -fsSL "https://raw.githubusercontent.com/SlashUsrVin/CAKE-ConnMark/main/install.sh" | sh  
 ```
 7. Script runs immediately after installation.  
   
@@ -40,7 +40,7 @@ DO NOT include inline comments with these parameters. Comments on a separate lin
 | __!CHAIN__ [_FORWARD/POSTROUTING_] | Normally both outgoing and incoming traffic will be prioritized. In case you only need 1 way, you can exclude one here. i.e !CHAIN POSTROUTING if you only want the incoming packets prioritized. (good for streaming devices) | !CHAIN POSTROUTING |  
   
 #### Supported DSCP Classes by CAKE-ConnMark (diffserv4):  
-_Install CAKE-SpeedSync to enable diffserv4: https://github.com/mvin321/CAKE-SpeedSync_  
+_Install CAKE-SpeedSync to enable diffserv4: https://github.com/SlashUsrVin/CAKE-SpeedSync_  
 | Priority | DSCP Name | Decimal | Hex    | CAKE Class  |  
 | -------- | --------- | ------- | ------ | ----------- |  
 | Highest  | EF        | 46      | 0x2e   | Voice       |  

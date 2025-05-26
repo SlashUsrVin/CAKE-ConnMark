@@ -1,6 +1,6 @@
 #!/bin/sh
 # CAKE-ConnMark - Installer
-# Copyright (C) 2025 https://github.com/mvin321
+# Copyright (C) 2025 https://github.com/SlashUsrVin
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-CCM_REPO="mvin321/CAKE-ConnMark"
+CCM_REPO="SlashUsrVin/CAKE-ConnMark"
 BRANCH="main"
 JFFS_DIR="/jffs/scripts"
 TGT_DIR="/jffs/scripts/cake-connmark"
@@ -50,8 +50,8 @@ mkdir -p "$TGT_DIR/tmp"
 #Fetch scripts from github
 fetch_file "$CCM_REPO" "cake-connmark.sh" "$TGT_DIR"
 fetch_file "$CCM_REPO" "ipcalc.sh" "$TGT_DIR"
-fetch_file "mvin321/IP2Regex-Shell" "ip2regex.sh" "$TGT_DIR"
-fetch_file "mvin321/ExecLock-Shell" "exec-lock.sh" "$JFFS_DIR"
+fetch_file "SlashUsrVin/IP2Regex-Shell" "ip2regex.sh" "$TGT_DIR"
+fetch_file "SlashUsrVin/ExecLock-Shell" "exec-lock.sh" "$JFFS_DIR"
 
 #Fetch configuration files
 for f in $(curl -s "https://api.github.com/repos/$CCM_REPO/contents/cfg?ref=$BRANCH" | jq -r '.[].name'); do
