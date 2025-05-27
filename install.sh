@@ -78,4 +78,4 @@ dos2unix $JFFS_DIR/exec-lock.sh
 cru d cake-connmark
 cru a cake-connmark "* 9-23,0-3 * * * /jffs/scripts/exec-lock.sh /jffs/scripts/cake-connmark/cake-connmark.sh"
 
-printf "\nInstallation Complete! CAKE-ConnMark will run every minute from 9:00 AM to 3:59 AM (daily)"
+printf "\nInstallation Complete! CAKE-ConnMark will run every minute from 9:00 AM to 3:59 AM (daily)\n\n"
