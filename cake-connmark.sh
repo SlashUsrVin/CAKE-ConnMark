@@ -24,26 +24,49 @@ DIR_CONN="$DIR_SCRIPTS/cake-connmark"
 DIR_CONN_CFG="$DIR_CONN/cfg"
 DIR_CONN_TMP="$DIR_CONN/tmp"
 
-printf "\n\n$logstart"
+logparm="$1"
+#######################################################################################
+# Hides or shows logging
+#######################################################################################
+log () {
+   #replace % with %% except if % is followed by s (%s) which is a string argument for printf
+   msg=$(echo "$1" | sed -e 's/%s/__KEEP_THIS__/g' -e 's/%/%%/g' -e 's/__KEEP_THIS__/%s/g')
+   if [ "$logparm" = "logging" ]; then
+      shift    #Remove msg (=$1) as 1st argument since msg can also contain multiple arguments (%s). This will avoid the whole string (msg) to be assigned to itself.
+      printf -- "$msg\n" "$@"
+   fi
+}
 
-#Extract value from conntrack parameters (i.e get 50000 in dport=50000, etc)
+#######################################################################################
+# Extract value from conntrack parameters (i.e get 50000 in dport=50000, etc)
+#######################################################################################
 extract_value () {
     xfield="$1"
     xvalue=$(echo "$xfield" | awk -F= '{print $2}')
     echo "$xvalue"
 }
 
-#escapes dotted string to be usable in regex. i.e 192\.168\.1\.1
+#######################################################################################
+# Escapes "." from IP so it can be use in grep
+#######################################################################################
 esc_dot () {
     dottedstr="$1"
     echo "$1" | sed 's/\./\\./g'
 }
 
+#######################################################################################
+# Clears temporary iptable files
+#######################################################################################
 clear_tmp_files () {
-    > "$DIR_CONN_TMP/ipt.curr"
+    > "$DIR_CONN_TMP/curr.ipt"
+    > "$DIR_CONN_TMP/all.ipt"
+    > "$DIR_CONN_TMP/del.ipt"
     > "$DIR_CONN_TMP/connt.tmp"
 }
 
+#######################################################################################
+# Clears temporary generated regex files
+#######################################################################################
 clear_rgx_files () {
     > "$DIR_CONN_TMP/srcip_in.rgx"
     > "$DIR_CONN_TMP/srcip_ex.rgx"
@@ -53,10 +76,12 @@ clear_rgx_files () {
     > "$DIR_CONN_TMP/dport_ex.rgx"
 }
 
-#Converts CIDR to Regular Expression
-#SAMPLE INPUT: 192.168.1.1/24 
-#SAMPLE OUTPUT: (192)\.(168)\.(1)\.([0-9]|[2-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])
-#If input is individual IPs (not annotated), escape the dots (i.e 192\.168\.1\.100).
+#######################################################################################
+# Converts CIDR to Regular Expression
+# SAMPLE INPUT: 192.168.1.1/24 
+# SAMPLE OUTPUT: (192)\.(168)\.(1)\.([0-9]|[2-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])
+# If input is individual IPs (not annotated), escape the dots (i.e 192\.168\.1\.100).
+#######################################################################################
 ip_to_regex_range () {
     ip="$1"
 
@@ -67,7 +92,7 @@ ip_to_regex_range () {
     ipcalc="$DIR_CONN/ipcalc.sh"
     regx_ip_rng="$DIR_CONN/ip2regex.sh"
 
-    #Check if notation exists, if so, convert to ip ranges and generate regex
+    # Check if notation exists, if so, convert to ip ranges and generate regex
     if [ -n "$cidr" ]; then
         ip_R=$(sh "$ipcalc" "$c_ip") #convert notation to IP ranges
         rgx_ip=$(sh "$regx_ip_rng" $ip_R) #convert IP range to regular expression
@@ -78,8 +103,11 @@ ip_to_regex_range () {
     echo "$rgx_ip"
 }
 
+#######################################################################################
+# Enables the PORT parameter to contain ranges i.e 7000:8000
+#######################################################################################
 filter_port_range () {
-    #Include or Exclude port ranges in conntrack list
+    # Include or Exclude port ranges in conntrack list
     in_filter_method="$1" #I or E: Include or Exclude
     in_port_rngs="$2"
     in_connt="$3"
@@ -91,7 +119,7 @@ filter_port_range () {
         dest_port=$(echo "$f_conn" | awk '{print $4}' | awk -F= '{print $2}')
         port_match="0"
         for fport in $in_port_rngs; do
-            #check for port ranges
+            # check for port ranges
             set -- $(echo "$fport" | awk -F: '{print $1, $2}')
             p1="$1"
             p2="$2"
@@ -119,8 +147,12 @@ filter_port_range () {
     echo "$out_connt"
 }
 
-#construct conntrack command
-prioritize_conn () {
+#######################################################################################
+# This is the main function. It evaluates active connections from conntrack 
+# based on criteria defined in the configuration files, and applies the corresponding 
+# DSCP markings.     
+#######################################################################################
+process_config () {
     cfg_F="$1"
     conn_include_sip=""
     conn_exclude_sip=""
@@ -130,7 +162,9 @@ prioritize_conn () {
     conn_exclude_port=""
     conn_include_rport=""
     conn_exclude_rport=""    
-    ipt_exclude_chain=""
+    cf_in_chain=""
+    cf_out_chain=""
+    cf_cust_chain=""
     conn_pro=""
     cf_dscp=""
     connt_in_cmd=""
@@ -139,12 +173,12 @@ prioritize_conn () {
 
     while read -r cfg || [ -n "$cfg" ]; do
         cfg_P=$(echo "$cfg" | awk '{print $1}')
-        cfg_V=$(echo "$cfg" | awk '{$1=""; print $0}')
+        cfg_V=$(echo "$cfg" | cut -d' ' -f2-)
 
         for i in $cfg_V; do
             case "$cfg_P" in
                 "DSCP")
-                    #example for Voice Tin: 0x2e (EF) 0x28 (CS4)
+                    # example for Voice Tin: 0x2e (EF) 0x28 (CS4)
                     cf_dscp="$i"
                     ;;
                 "PROTOCOL")
@@ -155,131 +189,154 @@ prioritize_conn () {
                     fi     
                     ;;
                 "SRCIP")
-                    #Consolidate IPs in regex form, both single and CIDR are handled here
+                    # Consolidate IPs in regex form, both single and CIDR are handled here
                     i_ip=$(ip_to_regex_range "$i")
                     echo "\\bsrc=(${i_ip})\\b" >> "$DIR_CONN_TMP/srcip_in.rgx"
                     ;;
                 "!SRCIP")
-                    #Consolidate IPs in regex form, both single and CIDR are handled here
+                    # Consolidate IPs in regex form, both single and CIDR are handled here
                     x_ip=$(ip_to_regex_range "$i")
                     echo "\\bsrc=(${x_ip})\\b" >> "$DIR_CONN_TMP/srcip_ex.rgx"
                     ;; 
                 "DSTIP")
-                    #Consolidate IPs in regex form, both single and CIDR are handled here
+                    # Consolidate IPs in regex form, both single and CIDR are handled here
                     i_ip=$(ip_to_regex_range "$i")
-
                     echo "\\bdst=(${i_ip})\\b" >> "$DIR_CONN_TMP/dstip_in.rgx"
                     ;;
                 "!DSTIP")
-                    #Consolidate IPs in regex form, both single and CIDR are handled here
+                    # Consolidate IPs in regex form, both single and CIDR are handled here
                     x_ip=$(ip_to_regex_range "$i")
-
                     echo "\\bdst=(${x_ip})\\b" >> "$DIR_CONN_TMP/dstip_ex.rgx"
                     ;;                                       
                 "PORT")
-                    #Check for port range.
+                    # Check for port range.
                     set -- $(echo "$i" | awk -F: '{print $1, $2}')
                     i_p1="$1"
                     i_p2="$2"
 
                     if [ -n "$i_p2" ]; then
-                        #consolidate port ranges, this will be evaluated separately.
+                        # consolidate port ranges, this will be evaluated separately.
                         if [ -z "$conn_include_rport" ]; then
                             conn_include_rport="${i}"
                         else
                             conn_include_rport="${conn_include_rport} ${i}"
                         fi                        
                     else
-                        #If not range, consolidate in regex form
+                        # If not range, consolidate in regex form
                         echo "\\bdport=(${i_p1})\\b" >> "$DIR_CONN_TMP/dport_in.rgx"
                     fi
                     ;;
                 "!PORT")
-                    #Check for port range.
+                    # Check for port range.
                     set -- $(echo "$i" | awk -F: '{print $1, $2}')
                     x_p1="$1"
                     x_p2="$2"
 
                     if [ -n "$x_p2" ]; then
-                        #consolidate port ranges, this will be evaluated separately.
+                        # consolidate port ranges, this will be evaluated separately.
                         if [ -z "$conn_exclude_rport" ]; then
                             conn_exclude_rport="${i}"
                         else
                             conn_exclude_rport="${conn_exclude_rport} ${i}"
                         fi                        
                     else
-                        #If not range, consolidate in regex form
+                        # If not range, consolidate in regex form
                         echo "\\bdport=(${x_p1})\\b" >> "$DIR_CONN_TMP/dport_ex.rgx"
                     fi
                     ;;                    
-                "!CHAIN")
-                    #Re-assign whole value - Chain criteria will be evaluated separately
-                    if [ -z "$ipt_exclude_chain" ]; then
-                        ipt_exclude_chain="${cfg_V}"
+                "ICHAIN")
+                    # Re-assign whole value - Chain criteria will be evaluated separately
+                    if [ -z "$cf_in_chain" ]; then
+                        cf_in_chain="${cfg_V}"
                     fi                    
                     ;;
+                "OCHAIN")
+                    # Re-assign whole value - Chain criteria will be evaluated separately
+                    if [ -z "$cf_out_chain" ]; then
+                        cf_out_chain="${cfg_V}"
+                    fi                    
+                    ;;   
+                "NCHAIN")
+                    # Re-assign whole value - Chain criteria will be evaluated separately
+                    if [ -z "$cf_cust_chain" ]; then
+                        cf_cust_chain="${cfg_V}"
+                    fi                    
+                    ;;                                        
                 *)
                 ;;
             esac
         done
     done < "$cfg_F"
 
-    connt_cmd="conntrack -L -u ASSURED 2>/dev/null | grep -vE \"src=127\.0\.0\.1\" | grep -E \"\\b($conn_pro)\\b\""
+    # Base conntrack command
+    connt_cmd="conntrack -L -u ASSURED 2>/dev/null | grep -vE \"src=127\.0\.0\.1\""
+    
+    # Append protocol
+    connt_cmd="$connt_cmd | grep -E \"\\\\b($conn_pro)\\\\b\""
 
+    # Exclude inactive connections
+    connt_cmd="$connt_cmd | grep -vE \"TIME_WAIT|CLOSE|CLOSE_WAIT|LAST_ACK|FIN_WAIT\""
+
+    # Regex exclusion
     for rgx in "$DIR_CONN_TMP"/*_ex.rgx; do
-        echo "$rgx"
+        log "$rgx"
         if [ -s "$rgx" ]; then
-            cat "$rgx"
+            log "$(cat "$rgx")"
             connt_cmd="$connt_cmd | grep -vE -f \"${rgx}\""
         fi
     done
 
+    # Regex inclusion
     for rgx in "$DIR_CONN_TMP"/*_in.rgx; do
-        echo "$rgx"    
+        log "$rgx"    
         if [ -s "$rgx" ]; then
-            cat "$rgx"        
+            log "$(cat "$rgx")"
             connt_cmd="$connt_cmd | grep -E -f \"${rgx}\""
         fi
     done
 
+    # Output only parameters needed for creating iptables
     connt_cmd="$connt_cmd | awk '/udp|icmp/ { print \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$1 } /tcp/ { print \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12, \$1 }'"
     
     connt=$(sh -c "$connt_cmd")
-    echo "$connt_cmd"
-    echo "connt=$connt"
+    log "$connt_cmd"
+    log "connt=$connt"
     
-    #If port ranges are present in !PORT parameter, they will be filtered here.
-    echo "conn_exclude_rport=$conn_exclude_rport"
+    # If port ranges are present in !PORT parameter, they will be filtered here.
+    log "conn_exclude_rport=$conn_exclude_rport"
     if [ -n "$conn_exclude_rport" ] && [ -n "$connt" ]; then
         connt=$(filter_port_range "E" "$conn_exclude_rport" "$connt")
-        echo "filtered-exclude-connt=$connt"
+        log "filtered-exclude-connt=$connt"
     fi
     
-    #If port ranges are present in PORT parameter, they will be filtered here.
-    echo "conn_include_rport=$conn_include_rport"
+    # If port ranges are present in PORT parameter, they will be filtered here.
+    log "conn_include_rport=$conn_include_rport"
     if [ -n "$conn_include_rport" ] && [ -n "$connt" ]; then
         connt=$(filter_port_range "I" "$conn_include_rport" "$connt")
-        echo "filtered-include-connt=$connt"
+        log "filtered-include-connt=$connt"
     fi
 
     if [ -n "$connt" ]; then
-        build_ipt "$connt" "$cf_dscp" "$ipt_exclude_chain"
+        process_conntrack "$connt" "$cf_dscp" "$cf_in_chain" "$cf_out_chain" "$cf_cust_chain"
     fi
 }
 
+#######################################################################################
+# Ensures that rules are sorted by dscp value, from highest to lowest for each chain  
+#######################################################################################
 find_insert_seq () {
-    ins_chain="$1" #FORWARD or POSTROUTING
+    ins_chain="$1" 
     ins_protocol="$2" #tcp, udp, icmp
     ins_dscp="$3" #in hex form
     
-    #Get current iptable rules for the current chain including sequence number
-    chain_rules=$(iptables-save -t mangle | grep DSCP | grep "${ins_chain}" | awk '{print NR, $0}')
+    # Get current iptable rules for the current chain including sequence number
+    chain_rules=$(iptables-save -t mangle | grep "DSCP" | grep "${ins_chain}" | awk '{print NR, $0}')
 
     dscp_lvl="0"
     chck_lvl="0"
     seq="0"
 
-    #Loop through all the supported dscp value from highest to lowest
+    # Loop through all the supported dscp value from highest to lowest
     for hex in 0x2e 0x2c 0x28 0x22 0x24 0x26 0x20 0x00 0x08; do
         
         dscp_lvl=$(( dscp_lvl + 1))
@@ -313,23 +370,142 @@ find_insert_seq () {
     echo "$seq"    
 }
 
-#Create iptables mangle rules - check TINS.txt for dscp value in hex, decimal and classes
-build_ipt () {
+#######################################################################################
+# Writes to the temp file curr.ipt. This ensures that only active       
+# connections based from conntrack will have the iptable rules created                
+# it is used to delete iptable rules that are already inactive
+#######################################################################################
+check_and_write_to_ipt () {
+    rc_chk="$1"
+    ipt_str="$2"
+
+    ipt_file="$DIR_CONN_TMP/curr.ipt"
+    
+    if [ "$rc_chk" -le 1 ]; then
+        if ! grep -Fxq -- "$ipt_str" "$ipt_file"; then
+            echo "$ipt_str" >> "$ipt_file"
+            log "\nipt written...\n"
+        fi
+    fi    
+}
+
+#######################################################################################
+# Creates the iptables rules in the mangle table. It creates custom chain based from 
+# the configuration files
+#######################################################################################
+create_mangle () {
+    chains="$1" 
+    custom_chain="$2"
+    ipt_p="$3"
+    ipt_s="$4"
+    ipt_d="$5"
+    ipt_sp="$6" 
+    ipt_dp="$7"
+    ipt_dscp="$8"
+    direction="$9"
+
+    ipt_cmd="" 
+    ipt_cmd_strip_line=""
+    write_ipt="0"
+
+    # Ensure only Client/Device IPs will be the basis for redirection (easier to look at when monitoring)
+    case "$direction" in 
+        INBOUND)
+            #main_direction="-d ${ipt_d}/32"
+            #cust_direction="-s ${ipt_s}/32"
+            main_chain_ip="-d ${ipt_d}/32"
+            main_chain_port="--dport ${ipt_dp}"              
+            cust_chain_ip="-s ${ipt_s}/32"
+            cust_chain_port="--sport ${ipt_sp}"              
+            ;;
+        OUTBOUND)
+            #main_direction="-s ${ipt_s}/32"                    
+            #cust_direction="-d ${ipt_d}/32"
+            main_chain_ip="-s ${ipt_s}/32"                   
+            main_chain_port="--sport ${ipt_sp}"               
+            cust_chain_ip="-d ${ipt_d}/32"          
+            cust_chain_port="--dport ${ipt_dp}"              
+            ;;
+            
+    esac
+
+    if [ -n "$custom_chain" ]; then
+        if ! iptables -t mangle -S ${custom_chain} >/dev/null 2>&1; then
+            iptables -t mangle -N ${custom_chain}
+            iptables -t mangle -A ${custom_chain} -j RETURN
+        fi
+    fi
+
+    # Need to strickly follow the sequence of arguments for current clean-up logic to work
+    # -s 192.168.2.10/32 -j GAMING_PC_TCP
+    ipt_r_spec1="${main_chain_ip} -j ${custom_chain}"
+    #ipt_r_spec1="${main_chain_ip} -p ${ipt_p} -m ${ipt_p} ${main_chain_port} -j ${custom_chain}"
+    
+    # Need to strickly follow the sequence of arguments for current clean-up logic to work
+    # -d 8.8.8.8/32 -p tcp -m tcp --sport 5223 --dport 49978 -j DSCP --set-dscp 0x28    
+    #ipt_r_spec2="${cust_direction} -p ${ipt_p} -m ${ipt_p} --sport ${ipt_sp} --dport ${ipt_dp} -j DSCP --set-dscp ${ipt_dscp}"
+    ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j DSCP --set-dscp ${ipt_dscp}"
+    
+    for chain in $chains; do        
+        ipt_main_chain="${chain}"
+        
+        ipt_main="$ipt_main_chain $ipt_r_spec1"
+        log "ipt_main=$ipt_main"
+
+        iptables -t mangle -C ${ipt_main} >/dev/null 2>&1
+        rc="$?"
+        case "$rc" in 
+            0)
+                log "\nThis redirection rule already exists.. ignoring to avoid duplication\n"
+                ;;
+            1)
+                iptables -t mangle -A ${ipt_main}
+                log "\nRedirection rule created (${chain}) --> $ipt_main"
+                ;;
+            *)
+                log "\nError executing iptables -t mangle -C!\n"
+                ;;
+        esac
+
+        check_and_write_to_ipt "$rc" "$ipt_main" 
+
+        ipt_custom="$custom_chain $ipt_r_spec2"
+        log "ipt_custom=$ipt_custom"
+
+        iptables -t mangle -C ${ipt_custom} >/dev/null 2>&1
+        rc="$?"
+        case "$rc" in 
+            0)
+                log "\nThis handling rule already exists.. ignoring to avoid duplication\n"        
+                ;;
+            1)
+                ipt_seq=$(find_insert_seq "$custom_chain" "$ipt_p" "$ipt_dscp")
+                ipt_i_custom="$custom_chain $ipt_seq $ipt_r_spec2"
+
+                iptables -t mangle -I ${ipt_i_custom}
+                log "\nHandling rule created (${custom_chain}) --> $ipt_i_custom"
+                ;;
+            *)
+                log "\nError executing iptables -t mangle -C!\n"
+                ;;
+        esac
+
+        check_and_write_to_ipt "$rc" "$ipt_custom"         
+    done 
+}
+
+#######################################################################################
+# Extracts necessary parameters from the identified conntract connections and calls
+# create_mangle function to the create the iptable rules
+#######################################################################################
+process_conntrack () {
     conns="$1"
-    dscp="$2"
-    exclude_chains="$3"
+    dscp="$2"   
 
-    chk_chain=$(echo "$exclude_chains" | grep -ioE "FORWARD")
-    if [ -n "$chk_chain" ]; then
-        include_forw="1"
-    fi
-    chk_chain=$(echo "$exclude_chains" | grep -ioE "POSTROUTING")
-    if [ -n "$chk_chain" ]; then
-        include_post="1"
-    fi
+    tgt_chain_in="$3"
+    tgt_chain_out="$4"
 
-    include_forw="${include_forw:-0}"
-    include_post="${include_post:-0}"
+    handling_chain="$5"
    
     echo "$conns" | while read -r conn; do
         set -- $(echo "$conn" | awk '{print $1, $2, $3, $4, $5, $6, $7, $8, $9}')
@@ -343,84 +519,53 @@ build_ipt () {
         in_remotePort=$(extract_value "$7")
         in_clientPort=$(extract_value "$8")
 
-        if [ "$include_post" -ne 1 ]; then
-            ipt_seq1=$(find_insert_seq "POSTROUTING" "$conn_protocol" "$dscp")
-            ipt_post="POSTROUTING ${ipt_seq1} -s ${clientIP}/32 -d ${remoteIP}/32 -p ${conn_protocol} -m ${conn_protocol} --sport ${clientPort} --dport ${remotePort} -j DSCP --set-dscp ${dscp}"
-            ipt_post_strip_line=$(echo "$ipt_post" | grep -oE "\-s.*")
-            ipt_post_strip_line="POSTROUTING $ipt_post_strip_line"
-            echo "$ipt_post_strip_line" >> "$DIR_CONN_TMP/ipt.curr"
-            chk_ipt_post=$(iptables-save -t mangle | grep -- "$ipt_post_strip_line")
-            if [ -z "$chk_ipt_post" ]; then
-                printf "\ncreating POSTROUTING rules..."
-                iptables -t mangle -I ${ipt_post}
-                printf "\nrule creatd --> $ipt_post"
-            fi                
+        if [ -n "$tgt_chain_out" ]; then
+            create_mangle "$tgt_chain_out" "$handling_chain" "$conn_protocol" "$clientIP" "$remoteIP" "$clientPort" "$remotePort" "$dscp" "OUTBOUND"       
         fi
 
-        if [ "$include_forw" -ne 1 ]; then
-            ipt_seq2=$(find_insert_seq "FORWARD" "$conn_protocol" "$dscp")
-            ipt_pre="FORWARD ${ipt_seq2} -s ${remoteIP}/32 -d ${clientIP}/32 -p ${conn_protocol} -m ${conn_protocol} --sport ${remotePort} --dport ${clientPort} -j DSCP --set-dscp ${dscp}"                 
-            ipt_pre_strip_line=$(echo "$ipt_pre" | grep -oE "\-s.*")
-            ipt_pre_strip_line="FORWARD $ipt_pre_strip_line"
-            echo "$ipt_pre_strip_line" >> "$DIR_CONN_TMP/ipt.curr"
-            chk_ipt_pre=$(iptables-save -t mangle | grep -- "$ipt_pre_strip_line")            
-        
-            if [ -z "$chk_ipt_pre" ]; then
-                printf "\n\ncreating FORWARD rules..."
-                iptables -t mangle -I ${ipt_pre}
-                printf "\nrule creatd --> $ipt_pre"
-            fi
+        if [ -n "$tgt_chain_in" ]; then
+            create_mangle "$tgt_chain_in" "$handling_chain" "$conn_protocol" "$remoteIP" "$clientIP" "$remotePort" "$clientPort" "$dscp" "INBOUND"
         fi
     done 
 }
 
-##################
-# MAIN
-##################
-
-#Only pass argument for testing as it will clear up all iptables and will only create rules for this particular config file
-#This script is intended to be run without passing an argument to process all config files in /jffs/scripts/cake-connmark/cfg/*.cfg
-cfg_files="$1" 
-
-if [ -z "$cfg_files" ]; then
-    cfg_files="$DIR_CONN_CFG/*.cfg"
-fi
-
+# Clear temporary files
 clear_tmp_files
-#Read all config files
-for file in $cfg_files; do
-    echo "$file"
-    clear_rgx_files
-    prioritize_conn $file
+
+# Process config files
+for file in $DIR_CONN_CFG/*.cfg; do
+    log "Processing $file"
+    # Clear generated regex files every time a new cfg is being processed
+    clear_rgx_files 
+    # Ensure any newly uploaded config is in unix format
+    dos2unix $file
+    
+    process_config $file
 done
 
-iptrules=$(iptables-save -t mangle | grep DSCP)
-currconns=$(cat "$DIR_CONN_TMP/ipt.curr")
+# Perform iptables clean-up
+iptables-save -t mangle | grep -E "\-A [a-zA-Z]+" | sed 's/^-A //' | grep -v "\-j RETURN" > "$DIR_CONN_TMP/all.ipt"
+grep -Fxvf "$DIR_CONN_TMP/curr.ipt" "$DIR_CONN_TMP/all.ipt" > "$DIR_CONN_TMP/del.ipt"
+while read -r rule; do  
+    iptables -t mangle -D ${rule}
+    log "\nDELETED --> $rule"
+done < "$DIR_CONN_TMP/del.ipt"
 
-echo "$iptrules" | while read -r rule; do
-    strippedR=$(echo ${rule} | awk '{$1=""; sub(/^ /, ""); print}') #removed -A at the start of the string and remove space added by awk
-    activerule=$(echo "$currconns" | grep -- "${strippedR}")
-
-    if [[ -z "$activerule" && -n "$strippedR" ]]; then
-        iptables -t mangle -D ${strippedR}
-        printf "\nDELETED --> $strippedR"
-    fi
-done
-
-#check if correct filter exists to ensure DSCP tagging for ifb4eth0 is retained
-if  ! tc filter show dev eth0 | grep -q "protocol all pref 10 u32 chain 0"; then 
-    printf "\n\nadding tc filter.."
+# Apply tc filters to retain dscp for inbound traffic
+if  ! tc filter show dev eth0 | grep -q "protocol ip pref 10 u32 chain 0"; then 
+    log "\n\nadding tc filter.."
     tc filter del dev eth0
-    tc filter replace dev eth0 protocol all prio 10 u32 match u32 0 0 action mirred egress redirect dev ifb4eth0
-    printf "\n\nDone.."
+    tc filter replace dev eth0 protocol ip pref 10 u32 match u32 0 0 action mirred egress redirect dev ifb4eth0
+    log "\n\nDone.."
 fi
 
-connTO="90" #conntract UDP timeout settings - default is 30 sec
-
+# Make conntract keep entries longer
+connTO="90" #default is 30
 if [ "$(cat /proc/sys/net/netfilter/nf_conntrack_udp_timeout)" -lt "$connTO" ]; then 
     echo "$connTO" > /proc/sys/net/netfilter/nf_conntrack_udp_timeout
-    printf "\n\nconntrack udp timeout updated to $connTO seconds"
+    log "\n\nconntrack udp timeout updated to $connTO seconds"
 fi
 
+# Clear temporary files
 clear_tmp_files
 clear_rgx_files

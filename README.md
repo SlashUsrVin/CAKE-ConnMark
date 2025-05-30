@@ -29,14 +29,16 @@ DO NOT include inline comments with these parameters. Comments on a separate lin
 | Parameter | Description                                                              | Example/Usage                          |  
 | --------- | ------------------------------------------------------------------------ | -------------------------------------- |  
 | __PROTOCOL__  [_udp/tcp/icmp_] | Protocol to look for in conntrack. Can set 1 or more (separate with space ) protocol                                 | PROTOCOL udp                           |  
-| __SRCIP__ [_ip address_] | Picks active connection from conntrack with this Source IP. Multiple ips can be set separated by a single space or a separate SRCIP line. Can set CIDR i.e 192.168.1.1/24 | SRCIP 192.168.2.10 192.168.2.11  |  
-| __DSTIP__ [ip address] | Picks active connection from conntrack with this Destination IP. Multiple ips can be set separated by a single space or a separate SRCIP line. Can set CIDR i.e 192.168.1.1/24 | DSTIP 8.8.8.8 8.8.4.4 |  
-| __PORT__ [_port number_] | This is destination port (remote port) (the one used in port forwarding). Can be set for multiple protocol (separate with 1 space) | PROTOCOL udp |  
-| __DSCP__ [_hex value_] | Check table below for the list of supported dscp value. Priority to set when creating iptables rules | DSCP 0x2e |  
+| __SRCIP__ [_ip address_] | Picks active connection from conntrack with this Source IP. Multiple ips can be set separated by a single space or a separate SRCIP line. Can set CIDR i.e 192.168.1.1/24 | SRCIP 192.168.2.10  |  
 | __!SRCIP__ [_ip address_] | Opposite of SRCIP, exclude connection with this Source IP. Usage is the same as SRCIP just put ! at the beginning | !SRCIP 192.168.2.10 |  
+| __DSTIP__ [ip address] | Picks active connection from conntrack with this Destination IP. Multiple ips can be set separated by a single space or a separate SRCIP line. Can set CIDR i.e 192.168.1.1/24 | DSTIP 8.8.8.8 8.8.4.4 |  
 | __!DSTIP__ [_ip address_] | Opposite of DSTIP, exclude connection with this Destination IP. Usage is the same as DSTIP just put ! at the beginning | !DSTIP 8.8.8.8 8.8.4.4 |  
-| __!PORT__ [_port number_] | Opposite of PORT, exclude connection with this destination port. Usage is the same as PORT just put ! at the beginning | !PROTOCOL udp |  
-| __!CHAIN__ [_FORWARD/POSTROUTING_] | Normally both outgoing and incoming traffic will be prioritized. In case you only need 1 direction, you can exclude one here. i.e !CHAIN POSTROUTING if you only want the incoming packets prioritized. (good for streaming devices) | !CHAIN POSTROUTING |  
+| __PORT__ [_port number_] | This is destination port (remote port) (the one used in port forwarding). Can be set for multiple protocol (separate with 1 space) | PORT 7000:8000 |  
+| __!PORT__ [_port number_] | Opposite of PORT, exclude connection with this destination port. Usage is the same as PORT just put ! at the beginning | !PORT 443 80 |  
+| __DSCP__ [_hex value_] | Check table below for the list of supported dscp value. Priority to set when creating iptables rules | DSCP 0x2e |    
+| __ICHAIN__ [_CHAIN NAME_] | Define which iptable (mangle) chain to be used for incoming traffic. Separate with space for multiple chains.  | ICHAIN FORWARD |  
+| __OCHAIN__ [_CHAIN NAME_] | Define which iptable (mangle) chain to be used for outgoing traffic. Separate with space for multiple chains.  | ICHAIN FORWARD POSTROUTING |  
+| __NCHAIN__ [_CUSTOM NAME_] (required for now)| This is a custom chain. It will be created when the script runs. This is used to group rules into single chain. Example, if you have multiple *.cfg files with the same NCHAIN, rules created based of those cfg will be grouped in the same chain.  | NCHAIN GAMING_TRAFFIC |  
   
 #### Supported DSCP Classes by CAKE-ConnMark (diffserv4):  
 _Install CAKE-SpeedSync to enable diffserv4: https://github.com/SlashUsrVin/CAKE-SpeedSync_  
@@ -54,84 +56,99 @@ _Install CAKE-SpeedSync to enable diffserv4: https://github.com/SlashUsrVin/CAKE
   
 ### Example Configurations  
 #### Example 1: Streaming (i.e for Apple Tv, FireStick, Roku devices)  
-    # Target protocol are both tcp and udp since video streaming can use either
-    PROTOCOL tcp udp  
+    # Target Protocol
+    PROTOCOL tcp udp
 
-    #  My FireStick Devices  
-    SRCIP 192.168.2.199  
-    SRCIP 192.168.2.200  
-    
-    # DESTINATION PORT - these are the ports that are commonly used for streaming (but mostly 443). Update it as needed.  
-    PORT 80 443 1935 8080  
-    
-    # Mark connection with DSCP 0x26 (lowest priority in Video tin, but higher than best-effort/default traffic)  
-    DSCP 0x26  
-    
-    # EXCLUDE CHAIN - Exclude POSTROUTING chain. Only prioritize incoming traffic (use FORWARD chain only)  
-    !CHAIN POSTROUTING  
+    # SOURCE IPs
+    #   Streaming device IPs - REPLACE IPS WITH YOUR STREAMING DEVICE IPS (i.e Smart TV, FireStick, ChromeCast, Roku TV, Google TV, Apple TV, etc).
+
+    #  My FireStick Devices
+    SRCIP 192.168.2.199 192.168.2.200
+
+    # DESTINATION PORT - these are the ports that are commonly used for streaming (but mostly 443). Update it as needed.
+    PORT 80 443 1935 8080
+
+    # Mark connection with DSCP 0x26 (lowest priority in Video tin, but higher than best-effort/default traffic)
+    DSCP 0x26
+
+    # Target chain for incoming traffic
+    ICHAIN FORWARD
+
+    #Since this are streaming devices no need to prioritize outgoing traffic. Only incoming traffic is prioritized for playback
+
+    # Redirect to custom chain for marking
+    NCHAIN STREAMING 
   
 #### Example 2: Gaming (i.e for PCs, Nintendo, Xbox, PlayStation, etc)  
-    # Online games uses udp protocol for real-time game communication  
-    PROTOCOL udp  
-      
-    # SOURCE IP (SCRIP)- Gaming Device IPs (Assign static IP to your devices). REPLACE IPS WITH YOUR GAMING DEVICE IPS.  
-      
-    #   My Gaming PCs  
-    SRCIP 192.168.2.11  
-    SRCIP 192.168.2.10  
-      
-    #   My Nintendo Switch Consoles  
-    SRCIP 192.168.2.20  
-    SRCIP 192.168.2.21  
-      
-    #   You can add more SRCIP lines as much as you need  
-      
+    # TARGET PROTOCOL
+    # Online games uses udp protocol for real-time game communication
+    PROTOCOL udp
+
+    # SOURCE IP (SCRIP)- Gaming Device IPs (Assign static IP to your devices). REPLACE IPS WITH YOUR GAMING DEVICE IPS.
+
+    #   My Gaming PCs
+    SRCIP 192.168.2.11 192.168.2.10
+
+    #   My Nintendo Switch Consoles
+    SRCIP 192.168.2.20 192.168.2.21
+
     # Any UDP traffic coming from SRCIP above that are NOT using ports (!PORT) below. 
-    # Excluding ports that are not usable by games since I'm too lazy to put ports for each game. "!"" at the beginning means exclude (reverse match).  
-    # If you want to specify the ports for a specific device you can also create your own cfg file. i.e pc-udp.cfg, nintendo-udp.cfg, xbox-udp.cfg, etc and use PORT instead of !PORT  
-      
+    
+    # If you want to specify the ports for a specific device you can also create your own cfg file. i.e pc-udp.cfg, nintendo-udp.cfg, xbox-udp.cfg, etc and use PORT instead of !PORT
+
     # DNS - Networking/Core Service  
-    !PORT 53  
+    !PORT 53
     # DHCP Server - Networking/Core Service  
-    !PORT 67  
+    !PORT 67
     # DHCP Client - Networking/Core Service  
-    !PORT 68  
+    !PORT 68
     # TFTP - File Transfer / Networking  
-    !PORT 69  
+    !PORT 69
     # HTTP - Web Traffic  
-    !PORT 80  
+    !PORT 80
     # NTP - Time Sync / Networking  
-    !PORT 123  
+    !PORT 123
     # NetBIOS Name Service - Legacy Windows Networking  
-    !PORT 137  
+    !PORT 137
     # NetBIOS Datagram Service - Legacy Windows Networking  
-    !PORT 138  
+    !PORT 138
     # SNMP - Monitoring/Network Management  
-    !PORT 161  
+    !PORT 161
     # SNMP Trap - Monitoring/Network Management  
-    !PORT 162  
+    !PORT 162
     # HTTPS - Web Traffic  
-    !PORT 443  
+    !PORT 443
     # IKE (IPsec VPN) - VPN / Security  
-    !PORT 500  
+    !PORT 500
     # RIP (Routing Information Protocol) - Routing / Networking  
-    !PORT 520  
+    !PORT 520
     # SSDP (UPnP Discovery) - Device Discovery / IoT  
-    !PORT 1900  
+    !PORT 1900
     # WS-Discovery - Device Discovery / IoT  
-    !PORT 3702  
+    !PORT 3702
     # IPsec NAT Traversal - VPN / Security  
-    !PORT 4500  
+    !PORT 4500
     # mDNS (Multicast DNS / Bonjour) - Device Discovery / Local DNS  
-    !PORT 5353  
+    !PORT 5353
     # HTTP Alternate (Dev/Proxy Servers) - Web Traffic / Dev Tools  
-    !PORT 8080  
+    !PORT 8080
     # Unspecified / App-specific (e.g., IoT, Unifi, etc.) - Application-Specific  
-    !PORT 19001  
-      
-    # Mark connection with DSCP 0x22 (highest priority (Voice Tin))  
-    DSCP 0x2e  
-    # You can't have more than 1 line with DSCP tag. The last one will be followed otherwise.  
-      
-    # No !CHAIN line -- This means both Incoming and Outgoing traffic will be prioritized (use FORWARD and POSTROUTING chains)  
+    !PORT 19001
+
+    # Mark connection with DSCP 0x22 (highest priority (Voice Tin))
+    DSCP 0x2e
+    # You can't have more than 1 line with DSCP tag. The last one will be followed otherwise.
+
+    # Target chain for incoming traffic
+    ICHAIN FORWARD
+    # Target chain for outgoing traffic
+    OCHAIN FORWARD
+    # Redirect to custom chain for marking
+    NCHAIN GAMING  
+
   
+### EXAMPLE iptables generated by this script
+    -A FORWARD -s 192.168.2.10/32 -c 3171 683312 -j GAMING
+    -A FORWARD -d 192.168.2.10/32 -c 5511 5149829 -j GAMING
+    -A GAMING -s 1.1.1.1/32 -p tcp -m tcp --sport 5223 --dport 51623 -c 52 2080 -j DSCP --set-dscp 0x28
+    -A GAMING -d 1.1.1.1/32 -p tcp -m tcp --sport 51623 --dport 5223 -c 52 2860 -j DSCP --set-dscp 0x28
