@@ -269,7 +269,7 @@ process_config () {
     done < "$cfg_F"
 
     # Base conntrack command
-    connt_cmd="conntrack -L -u ASSURED 2>/dev/null | grep -vE \"src=127\.0\.0\.1\""
+    connt_cmd="conntrack -L 2>/dev/null | grep -vE \"src=127\.0\.0\.1\""
     
     # Append protocol
     connt_cmd="$connt_cmd | grep -E \"\\\\b($conn_pro)\\\\b\""
