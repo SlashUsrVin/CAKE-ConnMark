@@ -269,7 +269,7 @@ process_config () {
     done < "$cfg_F"
 
     # Base conntrack command
-    connt_cmd="conntrack -L 2>/dev/null | grep -vE \"src=127\.0\.0\.1\""
+    connt_cmd="conntrack -L -u ASSURED 2>/dev/null | grep -vE \"src=127\.0\.0\.1\""
     
     # Append protocol
     connt_cmd="$connt_cmd | grep -E \"\\\\b($conn_pro)\\\\b\""
@@ -452,7 +452,7 @@ create_mangle () {
         ipt_main="$ipt_main_chain $ipt_r_spec1"
         log "ipt_main=$ipt_main"
 
-        iptables -t mangle -C ${ipt_main} >/dev/null 2>&1
+        iptables-save -t mangle | grep -F "${ipt_main}"
         rc="$?"
         case "$rc" in 
             0)
@@ -472,7 +472,7 @@ create_mangle () {
         ipt_custom="$custom_chain $ipt_r_spec2"
         log "ipt_custom=$ipt_custom"
 
-        iptables -t mangle -C ${ipt_custom} >/dev/null 2>&1
+        iptables-save -t mangle | grep -F "${ipt_custom}"
         rc="$?"
         case "$rc" in 
             0)
