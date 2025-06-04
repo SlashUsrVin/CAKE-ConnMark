@@ -468,6 +468,7 @@ create_mangle () {
         case "${m}" in
             PORT)
                 match_id="$(( match_id + 1))"
+                ;;
             IP)
                 match_id="$(( match_id + 2))"                
                 ;;
