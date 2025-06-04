@@ -61,6 +61,7 @@ clear_tmp_files () {
     > "$DIR_CONN_TMP/curr.ipt"
     > "$DIR_CONN_TMP/all.ipt"
     > "$DIR_CONN_TMP/del.ipt"
+    > "$DIR_CONN_TMP/del_ipt.sh"
     > "$DIR_CONN_TMP/connt.tmp"
 }
 
@@ -407,20 +408,17 @@ create_mangle () {
     ipt_cmd="" 
     ipt_cmd_strip_line=""
     write_ipt="0"
+    last_rule_in_chain=""
 
     # Ensure only Client/Device IPs will be the basis for redirection (easier to look at when monitoring)
     case "$direction" in 
         INBOUND)
-            #main_direction="-d ${ipt_d}/32"
-            #cust_direction="-s ${ipt_s}/32"
             main_chain_ip="-d ${ipt_d}/32"
             main_chain_port="--dport ${ipt_dp}"              
             cust_chain_ip="-s ${ipt_s}/32"
             cust_chain_port="--sport ${ipt_sp}"              
             ;;
         OUTBOUND)
-            #main_direction="-s ${ipt_s}/32"                    
-            #cust_direction="-d ${ipt_d}/32"
             main_chain_ip="-s ${ipt_s}/32"                   
             main_chain_port="--sport ${ipt_sp}"               
             cust_chain_ip="-d ${ipt_d}/32"          
@@ -429,21 +427,31 @@ create_mangle () {
             
     esac
 
+    # Ensure custom chain is created and -j RETURN is always the last rule of the chain
     if [ -n "$custom_chain" ]; then
-        if ! iptables -t mangle -S ${custom_chain} >/dev/null 2>&1; then
+        if ! iptables-save -t mangle | grep -q "^:${custom_chain} " >/dev/null 2>&1; then
             iptables -t mangle -N ${custom_chain}
             iptables -t mangle -A ${custom_chain} -j RETURN
+            log "Custom chain ${custom_chain} created"
+        else
+            last_rule_in_chain=$(iptables-save -t mangle | grep -E "^\-A ${custom_chain}" | tail -n 1)
+            if [ "$last_rule_in_chain" != "-A ${custom_chain} -j RETURN" ];then
+                iptables -t mangle -D ${custom_chain} -j RETURN 2>/dev/null
+                iptables -t mangle -A ${custom_chain} -j RETURN
+                log "RETURN step missing in ${custom_chain}. Rule re-added!"
+            fi
         fi
+    else
+        log "MISSING NCHAIN PARAMETER! Check config files. Execution cancelled!"
+        exit 1
     fi
 
     # Need to strickly follow the sequence of arguments for current clean-up logic to work
-    # -s 192.168.2.10/32 -j GAMING_PC_TCP
+    # FORWARD -s 192.168.2.10/32 -j STREAMING
     ipt_r_spec1="${main_chain_ip} -j ${custom_chain}"
-    #ipt_r_spec1="${main_chain_ip} -p ${ipt_p} -m ${ipt_p} ${main_chain_port} -j ${custom_chain}"
     
     # Need to strickly follow the sequence of arguments for current clean-up logic to work
-    # -d 8.8.8.8/32 -p tcp -m tcp --sport 5223 --dport 49978 -j DSCP --set-dscp 0x28    
-    #ipt_r_spec2="${cust_direction} -p ${ipt_p} -m ${ipt_p} --sport ${ipt_sp} --dport ${ipt_dp} -j DSCP --set-dscp ${ipt_dscp}"
+    # STREAMING -d 8.8.8.8/32 -p tcp -m tcp --sport 5223 --dport 49978 -j DSCP --set-dscp 0x28    
     ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j DSCP --set-dscp ${ipt_dscp}"
     
     for chain in $chains; do        
@@ -452,7 +460,7 @@ create_mangle () {
         ipt_main="$ipt_main_chain $ipt_r_spec1"
         log "ipt_main=$ipt_main"
 
-        iptables-save -t mangle | grep -F "${ipt_main}"
+        iptables-save -t mangle | grep -F "${ipt_main}" >/dev/null 2>&1
         rc="$?"
         case "$rc" in 
             0)
@@ -463,7 +471,7 @@ create_mangle () {
                 log "\nRedirection rule created (${chain}) --> $ipt_main"
                 ;;
             *)
-                log "\nError executing iptables -t mangle -C!\n"
+                log "\nError executing iptables-save -t mangle!\n"
                 ;;
         esac
 
@@ -472,7 +480,7 @@ create_mangle () {
         ipt_custom="$custom_chain $ipt_r_spec2"
         log "ipt_custom=$ipt_custom"
 
-        iptables-save -t mangle | grep -F "${ipt_custom}"
+        iptables-save -t mangle | grep -F "${ipt_custom}" >/dev/null 2>&1
         rc="$?"
         case "$rc" in 
             0)
@@ -486,7 +494,7 @@ create_mangle () {
                 log "\nHandling rule created (${custom_chain}) --> $ipt_i_custom"
                 ;;
             *)
-                log "\nError executing iptables -t mangle -C!\n"
+                log "\nError executing iptables-save -t mangle!\n"
                 ;;
         esac
 
@@ -544,26 +552,31 @@ for file in $DIR_CONN_CFG/*.cfg; do
 done
 
 # Perform iptables clean-up
-iptables-save -t mangle | grep -E "\-A [a-zA-Z]+" | sed 's/^-A //' | grep -v "\-j RETURN" > "$DIR_CONN_TMP/all.ipt"
+iptables-save -t mangle | grep -E "\-A [a-zA-Z]+" | sed 's/^-A //' | grep -v " -j RETURN$" > "$DIR_CONN_TMP/all.ipt"
 grep -Fxvf "$DIR_CONN_TMP/curr.ipt" "$DIR_CONN_TMP/all.ipt" > "$DIR_CONN_TMP/del.ipt"
-while read -r rule; do  
-    iptables -t mangle -D ${rule}
-    log "\nDELETED --> $rule"
-done < "$DIR_CONN_TMP/del.ipt"
+del_count=$(wc -l < "$DIR_CONN_TMP/del.ipt")
+
+if [ "$del_count" -gt 0 ]; then
+    sed 's/^/iptables -t mangle -D /' "$DIR_CONN_TMP/del.ipt" > "$DIR_CONN_TMP/del_ipt.sh"
+    chmod +x "$DIR_CONN_TMP/del_ipt.sh"
+    "$DIR_CONN_TMP/del_ipt.sh"
+
+    log "RULES DELETED (clean-up):\n$(cat "$DIR_CONN_TMP/del.ipt")\n"
+fi
 
 # Apply tc filters to retain dscp for inbound traffic
 if  ! tc filter show dev eth0 | grep -q "protocol ip pref 10 u32 chain 0"; then 
-    log "\n\nadding tc filter.."
     tc filter del dev eth0
-    tc filter replace dev eth0 protocol ip pref 10 u32 match u32 0 0 action mirred egress redirect dev ifb4eth0
-    log "\n\nDone.."
+    tc filter add dev eth0 protocol ip pref 10 u32 match u32 0 0 action mirred egress redirect dev ifb4eth0
+    log "TC FILTER ADDED:"
+    log "$(tc filter show dev eth0)"
 fi
 
 # Make conntract keep entries longer
 connTO="90" #default is 30
 if [ "$(cat /proc/sys/net/netfilter/nf_conntrack_udp_timeout)" -lt "$connTO" ]; then 
     echo "$connTO" > /proc/sys/net/netfilter/nf_conntrack_udp_timeout
-    log "\n\nconntrack udp timeout updated to $connTO seconds"
+    log "\n\nCONNTRACK UDP TIMEOUT UPDATED TO $connTO SECONDS\n"
 fi
 
 # Clear temporary files
