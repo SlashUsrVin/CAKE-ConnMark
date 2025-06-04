@@ -171,6 +171,7 @@ process_config () {
     connt_in_cmd=""
     connt_ex_cmd=""
     connt=""
+    cf_match_by=""
 
     while read -r cfg || [ -n "$cfg" ]; do
         cfg_P=$(echo "$cfg" | awk '{print $1}')
@@ -262,7 +263,14 @@ process_config () {
                     if [ -z "$cf_cust_chain" ]; then
                         cf_cust_chain="${cfg_V}"
                     fi                    
-                    ;;                                        
+                    ;;
+                "MATCHBY")
+                    # Re-assign whole value - Chain criteria will be evaluated separately
+                    if [ -z "$cf_match_by" ]; then
+                        cf_match_by="${cfg_V}"
+                    fi                    
+                    ;;                    
+                                                            
                 *)
                 ;;
             esac
@@ -318,7 +326,7 @@ process_config () {
     fi
 
     if [ -n "$connt" ]; then
-        process_conntrack "$connt" "$cf_dscp" "$cf_in_chain" "$cf_out_chain" "$cf_cust_chain"
+        process_conntrack "$connt" "$cf_dscp" "$cf_in_chain" "$cf_out_chain" "$cf_cust_chain" "$cf_match_by"
     fi
 }
 
@@ -402,8 +410,9 @@ create_mangle () {
     ipt_d="$5"
     ipt_sp="$6" 
     ipt_dp="$7"
-    ipt_dscp="$8"
-    direction="$9"
+    ipt_matchby="$8"
+    ipt_dscp="$9"
+    direction="$10"
 
     ipt_cmd="" 
     ipt_cmd_strip_line=""
@@ -450,10 +459,39 @@ create_mangle () {
     # FORWARD -s 192.168.2.10/32 -j STREAMING
     ipt_r_spec1="${main_chain_ip} -j ${custom_chain}"
     
-    # Need to strickly follow the sequence of arguments for current clean-up logic to work
-    # STREAMING -d 8.8.8.8/32 -p tcp -m tcp --sport 5223 --dport 49978 -j DSCP --set-dscp 0x28    
-    ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j DSCP --set-dscp ${ipt_dscp}"
-    
+    set -- $(echo "$ipt_matchby" | awk '{print $1, $2}')    
+    match1="$1"
+    match2="$2"
+    match_id="0"
+
+    for m in "$match1" "$match2"; do
+        case "${m}" in
+            PORT)
+                match_id="$(( match_id + 1))"
+            IP)
+                match_id="$(( match_id + 2))"                
+                ;;
+        esac
+    done
+
+    # Need to strickly follow the sequence/order of arguments for current clean-up logic to work
+    # STREAMING -d 8.8.8.8/32 -p tcp -m tcp --sport 5223 --dport 49978 -j DSCP --set-dscp 0x28
+    case "$match_id" in
+        0|3)
+            ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j DSCP --set-dscp ${ipt_dscp}"
+            ;;        
+        1)
+            ipt_r_spec2="-p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j DSCP --set-dscp ${ipt_dscp}"        
+            ;;        
+        2)
+            ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} -j DSCP --set-dscp ${ipt_dscp}"        
+            ;;
+        *)
+            log "ERROR in identifying match by"
+            exit 1
+            ;;
+    esac
+        
     for chain in $chains; do        
         ipt_main_chain="${chain}"
         
@@ -509,11 +547,10 @@ create_mangle () {
 process_conntrack () {
     conns="$1"
     dscp="$2"   
-
     tgt_chain_in="$3"
     tgt_chain_out="$4"
-
     handling_chain="$5"
+    match_by="$6"
    
     echo "$conns" | while read -r conn; do
         set -- $(echo "$conn" | awk '{print $1, $2, $3, $4, $5, $6, $7, $8, $9}')
@@ -528,11 +565,11 @@ process_conntrack () {
         in_clientPort=$(extract_value "$8")
 
         if [ -n "$tgt_chain_out" ]; then
-            create_mangle "$tgt_chain_out" "$handling_chain" "$conn_protocol" "$clientIP" "$remoteIP" "$clientPort" "$remotePort" "$dscp" "OUTBOUND"       
+            create_mangle "$tgt_chain_out" "$handling_chain" "$conn_protocol" "$clientIP" "$remoteIP" "$clientPort" "$remotePort" "$match_by" "$dscp" "OUTBOUND"       
         fi
 
         if [ -n "$tgt_chain_in" ]; then
-            create_mangle "$tgt_chain_in" "$handling_chain" "$conn_protocol" "$remoteIP" "$clientIP" "$remotePort" "$clientPort" "$dscp" "INBOUND"
+            create_mangle "$tgt_chain_in" "$handling_chain" "$conn_protocol" "$remoteIP" "$clientIP" "$remotePort" "$clientPort" "$match_by" "$dscp" "INBOUND"
         fi
     done 
 }
