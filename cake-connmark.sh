@@ -37,21 +37,66 @@ log () {
    fi
 }
 
-build_dscp_priority_map () {
-    # Supported DSCP from highest to lowest priority. ORDER is IMPORTANT
-    dscp_hex="0x2e 0x2c 0x28 0x22 0x24 0x26 0x20 0x00 0x08"
+#######################################################################################
+# Convert mark ID to hex
+#######################################################################################
+dec_to_hex () {
+    conv_dec="$1"
+    printf "0x%x\n" "$conv_dec"
+}
 
-    sort_id=1
+#######################################################################################
+# Build priority mapping for the Supported DSCP values. 
+# ORDER is IMPORTANT, value must be defined from lowest to highest priority. 
+# i.e 0x28 - lowest in voice tin;  0x2e - highest in voice tine; 
+#######################################################################################
+build_dscp_priority_map () {    
+    # Only need to udpate the 4 tin variables below when adding new dscp values
+    # Voice Tin 
+    tin4="0x28 0x2c 0x2e" # lowest --> highest
+    # Video Tin (high)
+    tin3="0x20 0x26 0x24 0x22" # lowest --> highest
+    # BestEffort (default)
+    tin2="0x00" 
+    # Bulk (lowest)
+    tin1="0x08" 
+
+    # Define an ID so its easier to read conntrack
+    # i.e mark=4000, mark=4001, mark=4002 are all marked for voice tin
+    write_dscp_map "$tin4" "4000"
+    write_dscp_map "$tin3" "3000"
+    write_dscp_map "$tin2" "2000"
+    write_dscp_map "$tin1" "1000"   
+}
+
+#######################################################################################
+# Populate the DSCP mapping file
+# Format: [connmark_id] [dscp_value_in_hex]
+# i.e 4002 0x2e
+#     4001 0x2c
+#     4000 0x28
+#     3002 0x22
+# This means any traffic in conntrack marked with 4000+ range will fall in voice tin
+#######################################################################################
+write_dscp_map () {
+    dscp_hex="$1"
+    connmark_id="$2"
+    
+    supp_dscp=""
+
     for hex in $dscp_hex; do
         if [ -z "$supp_dscp" ]; then
-            supp_dscp=$(printf "%s %s\n" "${sort_id}" "${hex}" )
+            supp_dscp=$(printf "%s %s\n" "${connmark_id}" "${hex}" )
         else
-            supp_dscp=$(printf "%s\n%s %s\n" "$supp_dscp" "${sort_id}" "${hex}")
+            supp_dscp=$(printf "%s\n%s %s\n" "$supp_dscp" "${connmark_id}" "${hex}")
         fi
-        sort_id=$(( sort_id + 1 ))
+        connmark_id=$(( connmark_id + 1 ))
     done
 
-    echo "$supp_dscp" > "$DIR_CONN_TMP/dscp.map"
+    if [ -n "$supp_dscp" ]; then
+        echo "$supp_dscp" >> "$DIR_CONN_TMP/dscp.map"    
+        sort -grk 1 "$DIR_CONN_TMP/dscp.map" -o "$DIR_CONN_TMP/dscp.map"
+    fi
 }
 
 #######################################################################################
@@ -79,10 +124,9 @@ clear_tmp_files () {
     > "$DIR_CONN_TMP/all.ipt"
     > "$DIR_CONN_TMP/del.ipt"
     > "$DIR_CONN_TMP/dscp.ipt"
+    > "$DIR_CONN_TMP/dscp.map"
     > "$DIR_CONN_TMP/del_ipt.sh"
-    > "$DIR_CONN_TMP/connt.tmp"
-    > "$DIR_CONN_TMP/dscp.tmp"
-    > "$DIR_CONN_TMP/dscp.map"    
+    > "$DIR_CONN_TMP/connt.tmp"        
 }
 
 #######################################################################################
@@ -349,6 +393,7 @@ process_config () {
 
 #######################################################################################
 # Ensures that rules are sorted by dscp value, from highest to lowest for each chain  
+# (NOT USED ANYMORE AFTER SWITCHING TO CONNMARK)
 #######################################################################################
 find_insert_seq () {
     ins_chain="$1" 
@@ -363,7 +408,6 @@ find_insert_seq () {
     seq="0"
 
     # Loop through all the supported dscp value from highest to lowest
-    # for hex in $dscp_hex; do
     while read -r dscp_map; do
         hex=$(echo "${dscp_map}" | awk '{print $2}')
         
@@ -445,20 +489,20 @@ rule_exist () {
 # Restore Mark from conntrack and retag DSCP
 #######################################################################################
 restore_mark () {
-    
     while read -r dscp_mapping; do
         set -- $(echo "${dscp_mapping}" | awk '{print $1, $2}')
-        seq_id="$1"
+        connmark_id=$(dec_to_hex "$1")
         conn_mark="$2"
-        echo "${seq_id} PREROUTING -m mark --mark ${conn_mark} -j DSCP --set-dscp ${conn_mark}" >> "$DIR_CONN_TMP/dscp.tmp"
+        echo "PREROUTING -m mark --mark ${connmark_id} -j DSCP --set-dscp ${conn_mark}" >> "$DIR_CONN_TMP/dscp.ipt"
     done < "$DIR_CONN_TMP/dscp.map"
 
-    # Ensure rules are inserted in the correct order based from priority 
-    cat "$DIR_CONN_TMP/dscp.tmp" | sort -gk 1 > "$DIR_CONN_TMP/dscp.ipt"
+    # Ensure rules are inserted in the correct order based from priority
+    # Sort by column 5 (connmark_id from dscp mapping)
+    sort -grk 5 "$DIR_CONN_TMP/dscp.ipt" -o "$DIR_CONN_TMP/dscp.ipt"
 
     # DSCP tagging rule for active connections to reduce clutter in the mangle table
-    while read -r line; do
-        ipt_restore_pre=$(echo "${line}" | grep -oE "PREROUTING.*")
+    while read -r restore_cmd; do
+        ipt_restore_pre="${restore_cmd}"
 
         log "ipt_restore_pre=$ipt_restore_pre"
         if ! rule_exist "${ipt_restore_pre}"; then
@@ -473,7 +517,7 @@ restore_mark () {
         if [ "$first_pre_rule" != "$restore_rule" ]; then
             iptables -t mangle -D ${restore_rule} 2>/dev/null
         fi
-        restore_ins_cmd=$(echo "$restore_rule" | sed 's/PREROUTING/PREROUTING 1/')
+        restore_ins_cmd=$(echo "$restore_rule" | sed 's/PREROUTING/PREROUTING 1/') # Sequence 1
         iptables -t mangle -I ${restore_rule}
     fi
 }
@@ -499,6 +543,17 @@ create_mangle () {
     write_ipt="0"
     last_rule_in_chain=""
 
+    # Retrieve Mark ID from dscp mapping
+    mark_id=$(grep -F "$ipt_dscp" "$DIR_CONN_TMP/dscp.map" | awk '{print $1}')
+
+    if [ -z "$mark_id" ]; then
+        log "Unsupported DSCP value ($ipt_dscp) defined in the cfg file"
+        exit 1
+    fi
+
+    # Convert mark ID to hex
+    mark_id=$(dec_to_hex "$mark_id")
+
     # Ensure only Client/Device IPs will be the basis for redirection (easier to look at when monitoring)
     case "$direction" in 
         INBOUND)
@@ -512,8 +567,7 @@ create_mangle () {
             main_chain_port="--sport ${ipt_sp}"               
             cust_chain_ip="-d ${ipt_d}/32"          
             cust_chain_port="--dport ${ipt_dp}"              
-            ;;
-            
+            ;;            
     esac
 
     # Ensure custom chain is created and -j RETURN is always the last rule of the chain
@@ -559,13 +613,13 @@ create_mangle () {
     # STREAMING -d 8.8.8.8/32 -p tcp -m tcp --sport 5223 --dport 49978 -j DSCP --set-dscp 0x28
     case "$match_id" in
         0|3)
-            ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j CONNMARK --set-xmark ${ipt_dscp}/0xffffffff"
+            ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j CONNMARK --set-xmark ${mark_id}/0xffffffff"
             ;;        
         1)
-            ipt_r_spec2="-p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j CONNMARK --set-xmark ${ipt_dscp}/0xffffffff"        
+            ipt_r_spec2="-p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j CONNMARK --set-xmark ${mark_id}/0xffffffff"        
             ;;        
         2)
-            ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} -j CONNMARK --set-xmark ${ipt_dscp}/0xffffffff"        
+            ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} -j CONNMARK --set-xmark ${mark_id}/0xffffffff"        
             ;;
         *)
             log "ERROR in identifying match by"
@@ -608,10 +662,7 @@ create_mangle () {
                 log "\nThis handling rule already exists.. ignoring to avoid duplication\n"        
                 ;;
             1)
-                ipt_seq=$(find_insert_seq "$custom_chain" "$ipt_p" "$ipt_dscp")
-                ipt_i_custom="$custom_chain $ipt_seq $ipt_r_spec2"
-
-                iptables -t mangle -I ${ipt_i_custom}
+                iptables -t mangle -A ${ipt_custom}
                 log "\nHandling rule created (${custom_chain}) --> $ipt_i_custom"
                 ;;
             *)
@@ -657,7 +708,6 @@ process_conntrack () {
         fi
     done 
 }
-
 
 # Clear temporary files
 clear_tmp_files
