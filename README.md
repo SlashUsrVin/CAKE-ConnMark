@@ -42,17 +42,17 @@ DO NOT include inline comments with these parameters. Comments on a separate lin
   
 #### Supported DSCP Classes by CAKE-ConnMark (diffserv4):  
 _Install CAKE-SpeedSync to enable diffserv4: https://github.com/SlashUsrVin/CAKE-SpeedSync_  
-| Priority | DSCP Name | Decimal | Hex    | CAKE Class  |  
-| -------- | --------- | ------- | ------ | ----------- |  
-| Highest  | EF        | 46      | 0x2e   | Voice       |  
-|          | VA        | 44      | 0x2c   | Voice       |  
-|          | CS5       | 40      | 0x28   | Voice       |  
-| High     | AF41      | 34      | 0x22   | Video       |  
-|          | AF42      | 36      | 0x24   | Video       |  
-|          | AF43      | 38      | 0x26   | Video       |  
-|          | CS4       | 32      | 0x20   | Video       |  
-| Normal   | CS0       | 0       | 0x00   | Best Effort |  
-| Lowest   | CS1       | 8       | 0x08   | Bulk        |  
+| Priority | DSCP Name | Decimal | Hex    | CAKE Class  |  Conntrack Mark |  
+| -------- | --------- | ------- | ------ | ----------- | --------------- |  
+| Highest  | EF        | 46      | 0x2e   | Voice       |     4002        |  
+|          | VA        | 44      | 0x2c   | Voice       |     4001        |  
+|          | CS5       | 40      | 0x28   | Voice       |     4000        |  
+| High     | AF41      | 34      | 0x22   | Video       |     3003        |  
+|          | AF42      | 36      | 0x24   | Video       |     3002        |  
+|          | AF43      | 38      | 0x26   | Video       |     3001        |  
+|          | CS4       | 32      | 0x20   | Video       |     3000        |  
+| Normal   | CS0       | 0       | 0x00   | Best Effort |     2000        |  
+| Lowest   | CS1       | 8       | 0x08   | Bulk        |     1000        |  
   
 ### Example Configurations  
 #### Example 1: Streaming (i.e for Apple Tv, FireStick, Roku devices)  
@@ -135,8 +135,8 @@ _Install CAKE-SpeedSync to enable diffserv4: https://github.com/SlashUsrVin/CAKE
     -A GAMING -d 1.1.1.1/32 -p tcp -m tcp --dport 59700 -j CONNMARK --set-xmark 0xfa2/0xffffffff
     -A GAMING -j RETURN
 
-#### Once connection have been marked in conntrack (i.e mark=46, which is 0x2e in hex) 
-    udp      17 179 src=192.168.2.11 dst=1.1.1.1 sport=52077 dport=59700 src=128.116.54.33 dst=127.0.1099.1 sport=59700 dport=52077 [ASSURED] mark=46 use=1
+#### Once connection have been marked in conntrack (i.e mark=4002, see table able for list of conntrack mark values) 
+    udp      17 179 src=192.168.2.11 dst=1.1.1.1 sport=52077 dport=59700 src=128.116.54.33 dst=127.0.1099.1 sport=59700 dport=52077 [ASSURED] mark=4002 use=1
 
 #### only the restore rules will be retained in the mangle table to keep the connection prioritized until inactive/disconnected
     -A PREROUTING -c 8675723 8105466045 -j CONNMARK --restore-mark --nfmask 0xffffffff --ctmask 0xffffffff
