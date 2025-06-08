@@ -131,19 +131,21 @@ _Install CAKE-SpeedSync to enable diffserv4: https://github.com/SlashUsrVin/CAKE
 #### A (CONNMARK) rule will be created to mark the connection based from the cfg file 
     -A FORWARD -s 192.168.2.11/32 -j GAMING
     -A FORWARD -d 192.168.2.11/32 -j GAMING
-    -A GAMING -s 1.1.1.1/32 -p tcp -m tcp --sport 59700 -j CONNMARK --set-xmark 0x2e/0xffffffff
-    -A GAMING -d 1.1.1.1/32 -p tcp -m tcp --dport 59700 -j CONNMARK --set-xmark 0x2e/0xffffffff
+    -A GAMING -s 1.1.1.1/32 -p tcp -m tcp --sport 59700 -j CONNMARK --set-xmark 0xfa2/0xffffffff
+    -A GAMING -d 1.1.1.1/32 -p tcp -m tcp --dport 59700 -j CONNMARK --set-xmark 0xfa2/0xffffffff
     -A GAMING -j RETURN
 
 #### Once connection have been marked in conntrack (i.e mark=46, which is 0x2e in hex) 
     udp      17 179 src=192.168.2.11 dst=1.1.1.1 sport=52077 dport=59700 src=128.116.54.33 dst=127.0.1099.1 sport=59700 dport=52077 [ASSURED] mark=46 use=1
 
 #### only the restore rules will be retained in the mangle table to keep the connection prioritized until inactive/disconnected
-    -A PREROUTING -j CONNMARK --restore-mark --nfmask 0xffffffff --ctmask 0xffffffff
-    -A PREROUTING -m mark --mark 0x2e -j DSCP --set-dscp 0x2e
-    -A PREROUTING -m mark --mark 0x2c -j DSCP --set-dscp 0x2c
-    -A PREROUTING -m mark --mark 0x28 -j DSCP --set-dscp 0x28
-    -A PREROUTING -m mark --mark 0x22 -j DSCP --set-dscp 0x22
-    -A PREROUTING -m mark --mark 0x24 -j DSCP --set-dscp 0x24
-    -A PREROUTING -m mark --mark 0x26 -j DSCP --set-dscp 0x26
-    -A PREROUTING -m mark --mark 0x20 -j DSCP --set-dscp 0x20
+    -A PREROUTING -c 8675723 8105466045 -j CONNMARK --restore-mark --nfmask 0xffffffff --ctmask 0xffffffff
+    -A PREROUTING -m mark --mark 0xfa2 -c 1278193 214888285 -j DSCP --set-dscp 0x2e
+    -A PREROUTING -m mark --mark 0xfa1 -c 0 0 -j DSCP --set-dscp 0x2c
+    -A PREROUTING -m mark --mark 0xfa0 -c 0 0 -j DSCP --set-dscp 0x28
+    -A PREROUTING -m mark --mark 0xbbb -c 0 0 -j DSCP --set-dscp 0x22
+    -A PREROUTING -m mark --mark 0xbba -c 0 0 -j DSCP --set-dscp 0x24
+    -A PREROUTING -m mark --mark 0xbb9 -c 0 0 -j DSCP --set-dscp 0x26
+    -A PREROUTING -m mark --mark 0xbb8 -c 0 0 -j DSCP --set-dscp 0x20
+    -A PREROUTING -m mark --mark 0x7d0 -c 0 0 -j DSCP --set-dscp 0x00
+    -A PREROUTING -m mark --mark 0x3e8 -c 0 0 -j DSCP --set-dscp 0x08
