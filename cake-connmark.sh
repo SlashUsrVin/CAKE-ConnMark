@@ -511,7 +511,7 @@ restore_mark () {
     done < "$DIR_CONN_TMP/dscp.ipt"
 
     # Ensure restore rule is always the first rule in PREROUTING chain
-    restore_rule="PREROUTING -j CONNMARK --restore-mark --nfmask 0xffffffff --ctmask 0xffffffff"
+    restore_rule="PREROUTING -m mark --mark 0x0 -j CONNMARK --restore-mark --nfmask 0xffffffff --ctmask 0xffffffff"
     if ! rule_exist "${restore_rule}"; then
         first_pre_rule=$(iptables-save -t mangle | grep -E "\-A PREROUTING.*" | head -n 1 | grep -oE "PREROUTING.*")
         if [ "$first_pre_rule" != "$restore_rule" ]; then
