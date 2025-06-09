@@ -651,6 +651,7 @@ create_mangle () {
         esac
         log "case1=$?"
         ipt_custom="$custom_chain $ipt_r_spec2"
+        ipt_i_custom="$custom_chain 1 $ipt_r_spec2"
         log "ipt_custom=$ipt_custom"
 
         # Create handling rules in custom chain
@@ -662,7 +663,7 @@ create_mangle () {
                 log "\nThis handling rule already exists.. ignoring to avoid duplication\n"        
                 ;;
             1)
-                iptables -t mangle -A ${ipt_custom}
+                iptables -t mangle -I ${ipt_i_custom}
                 log "\nHandling rule created (${custom_chain}) --> $ipt_i_custom"
                 ;;
             *)
