@@ -462,7 +462,7 @@ write_to_ipt () {
 check_rule () {
     chk_rule="$1"
     
-    iptables-save -t mangle | grep -F "${chk_rule}"
+    iptables-save -t mangle | grep -qF "${chk_rule}" 2>/dev/null
 
     return "$?"
 }
