@@ -1,6 +1,10 @@
 # CAKE-ConnMark - For ASUS router running MERLIN firmware.  
-  
-This script reads active connections from conntrack and dynamically generates iptables rules to mark packets with DSCP values helping CAKE QoS classify and prioritize traffic properly. Once installed, the script will run every minute from 9:00 AM to 3:59 AM. You can update the cronjob as needed (cru).  
+
+CAKE-ConnMark enhances traffic classification for CAKE QoS on Asuswrt-Merlin routers. It parses a user-defined configuration to identify active conntrack sessions based on protocol, IP addresses (with CIDR support), and ports. Matching connections are updated with a unique connection mark (connmark), which is then used to restore and apply the corresponding DSCP value via iptables.
+
+By marking and tagging flows in real time, the script enables targeted prioritization of traffic types—such as gaming, streaming, or VoIP—based on user-defined rules. This ensures CAKE can enforce QoS policies even for ongoing connections that would otherwise bypass initial classification.
+
+Once installed, the script will run every minute from 9:00 AM to 3:59 AM. You can update the cronjob as needed (cru).  
   
 ### __DEPENDENCIES:__  
 1. ASUS Router running on the latest MERLIN firmware. (https://sourceforge.net/projects/asuswrt-merlin/files/)  
@@ -19,7 +23,7 @@ curl -fsSL "https://raw.githubusercontent.com/SlashUsrVin/CAKE-ConnMark/main/ins
 ```
   
 ### __CONFIGURATION FILES:__  
-This script comes with sample configurations for gaming and video streaming, which you’ll need to customize by adding your own device IPs (e.g., gaming PCs, smart TVs, Fire Sticks). Once configured, it tags traffic so latency-sensitive applications like online games or video playback are prioritized.  
+This script comes with sample configurations for gaming and video streaming, which __YOU WILL NEED TO CUSTOMIZE__ by adding your own device IPs (e.g., gaming PCs, smart TVs, Fire Sticks). Once configured, it tags traffic so latency-sensitive applications like online games or video playback are prioritized.  
 1. You must modify the configuration files to reflect your device IPs on SRCIP lines here (also check example below): /jffs/scripts/cake-connmark/cfg  
 2. You can create your own config files and place it in the same directory.  
   
