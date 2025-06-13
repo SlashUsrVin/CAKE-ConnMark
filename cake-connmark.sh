@@ -213,28 +213,16 @@ filter_port_range () {
 }
 
 #######################################################################################
-# This is the main function. It evaluates active connections from conntrack 
-# based on criteria defined in the configuration files, and applies the corresponding 
-# DSCP markings.     
+# Parses configuration file, builds a dynamic conntrack filter and extracts active 
+# unmarked connections that match the criteria, and applies the specified DSCP mark
 #######################################################################################
-process_config () {
+build_filter_from_cfg () {
     cfg_F="$1"
-    conn_include_sip=""
-    conn_exclude_sip=""
-    conn_include_dip=""
-    conn_exclude_dip=""    
-    conn_include_port=""
-    conn_exclude_port=""
     conn_include_rport=""
     conn_exclude_rport=""    
-    cf_cust_chain=""
-    cf_mark_chain=""
     conn_pro=""
     cf_dscp=""
-    connt_in_cmd=""
-    connt_ex_cmd=""
     connt=""
-    cf_match_by=""
 
     while read -r cfg || [ -n "$cfg" ]; do
         cfg_P=$(echo "$cfg" | awk '{print $1}')
@@ -308,41 +296,18 @@ process_config () {
                         # If not range, consolidate in regex form
                         echo "\\bdport=(${x_p1})\\b" >> "$DIR_CONN_TMP/dport_ex.rgx"
                     fi
-                    ;;                    
-                "MARKCHAIN")
-                    # Re-assign whole value - Chain criteria will be evaluated separately
-                    if [ -z "$cf_mark_chain" ]; then
-                        cf_mark_chain=$(echo "${cfg_V}" | awk '{print $1}')
-                    fi                    
-                    ;;    
-                "NCHAIN")
-                    # Re-assign whole value - Chain criteria will be evaluated separately
-                    if [ -z "$cf_cust_chain" ]; then
-                        cf_cust_chain="${cfg_V}"
-                    fi                    
-                    ;;
-                "MATCHBY")
-                    # Re-assign whole value - Chain criteria will be evaluated separately
-                    if [ -z "$cf_match_by" ]; then
-                        cf_match_by="${cfg_V}"
-                    fi                    
-                    ;;                    
-                                                            
+                    ;;                                                                                                 
                 *)
                 ;;
             esac
         done
     done < "$cfg_F"
 
-    # Base conntrack command
-    connt_cmd="conntrack -L -u ASSURED 2>/dev/null | grep -vE \"src=127\.0\.0\.1\""
+    # Base conntrack command - Only include connections that have not been marked yet (--mark 0) 
+    connt_cmd="conntrack -L -u ASSURED --mark 0 2>/dev/null | grep -vE \"src=127\.0\.0\.1\""
     
     # Append protocol
     connt_cmd="$connt_cmd | grep -E \"\\\\b($conn_pro)\\\\b\""
-
-    # Only include connections that have not been marked yet. 
-    # This will also remove existing CONNMARK rules in FORWARD chain that are not needed anymore
-    connt_cmd="$connt_cmd |  grep -F \"mark=0\""
 
     # Exclude inactive connections
     connt_cmd="$connt_cmd | grep -vE \"TIME_WAIT|CLOSE|CLOSE_WAIT|LAST_ACK|FIN_WAIT\""
@@ -366,7 +331,7 @@ process_config () {
     done
 
     # Output only parameters needed for creating iptables
-    connt_cmd="$connt_cmd | awk '/udp|icmp/ { print \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$1 } /tcp/ { print \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12, \$1 }'"
+    connt_cmd="$connt_cmd | awk '/udp|icmp/ { print \$1, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11} /tcp/ { print \$1, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12}'"
     
     connt=$(sh -c "$connt_cmd")
     log "$connt_cmd"
@@ -387,59 +352,8 @@ process_config () {
     fi
 
     if [ -n "$connt" ]; then
-        process_conntrack "$connt" "$cf_dscp" "$cf_mark_chain" "$cf_cust_chain" "$cf_match_by"
+        update_conntrack "$connt" "$cf_dscp"
     fi
-}
-
-#######################################################################################
-# Ensures that rules are sorted by dscp value, from highest to lowest for each chain  
-# (NOT USED ANYMORE AFTER SWITCHING TO CONNMARK)
-#######################################################################################
-find_insert_seq () {
-    ins_chain="$1" 
-    ins_protocol="$2" #tcp, udp, icmp
-    ins_dscp="$3" #in hex form
-    
-    # Get current iptable rules for the current chain including sequence number
-    chain_rules=$(iptables-save -t mangle | grep -E "DSCP|CONNMARK" | grep "${ins_chain}" | awk '{print NR, $0}')
-
-    dscp_lvl="0"
-    chck_lvl="0"
-    seq="0"
-
-    # Loop through all the supported dscp value from highest to lowest
-    while read -r dscp_map; do
-        hex=$(echo "${dscp_map}" | awk '{print $2}')
-        
-        dscp_lvl=$(( dscp_lvl + 1))
-
-        if [ "$hex" = "$ins_dscp" ]; then
-            chck_lvl="${dscp_lvl}"
-        fi
-
-        rule_fetch=$(echo "$chain_rules" | grep "${hex}")
-
-        if [ -n "$rule_fetch" ]; then
-
-            if [ "$chck_lvl" -eq 0 ]; then
-                seq=$(echo "$rule_fetch" | awk 'END {print $1}') #insert at the bottom              
-                seq=$(( seq + 1 ))
-            elif [ "$chck_lvl" -ne 0 ] && [ "$chck_lvl" -le "$dscp_lvl" ]; then
-                seq=$(echo "$rule_fetch" | awk 'NR == 1 {print $1}') #insert at the top
-            fi
-        
-        fi
-
-        if [ "$seq" -ne 0 ] && [ "$chck_lvl" -ne 0 ]; then
-             break; #exit loop once sequence is found
-        fi
-    done < "$DIR_CONN_TMP/dscp.map"
-
-    if [ "$seq" -eq 0 ]; then
-        seq="1" #Default to 1 if insert position can't be found
-    fi
-       
-    echo "$seq"    
 }
 
 #######################################################################################
@@ -488,7 +402,7 @@ rule_exist () {
 #######################################################################################
 # Restore Mark from conntrack and retag DSCP
 #######################################################################################
-restore_mark () {
+restore_mark_and_set_dscp () {
     while read -r dscp_mapping; do
         set -- $(echo "${dscp_mapping}" | awk '{print $1, $2}')
         connmark_id=$(dec_to_hex "$1")
@@ -523,190 +437,33 @@ restore_mark () {
 }
 
 #######################################################################################
-# Creates the iptables rules in the mangle table. It creates custom chain based from 
-# the configuration files
+# Update conntrack with mark based from dscp mapping
+# 
 #######################################################################################
-create_mangle () {
-    chains="$1" 
-    custom_chain="$2"
-    ipt_p="$3"
-    ipt_s="$4"
-    ipt_d="$5"
-    ipt_sp="$6" 
-    ipt_dp="$7"
-    ipt_matchby="$8"
-    ipt_dscp="$9"
-    direction="$10"
-
-    ipt_cmd="" 
-    ipt_cmd_strip_line=""
-    write_ipt="0"
-    last_rule_in_chain=""
-
-    # Retrieve Mark ID from dscp mapping
-    mark_id=$(grep -F "$ipt_dscp" "$DIR_CONN_TMP/dscp.map" | awk '{print $1}')
-
-    if [ -z "$mark_id" ]; then
-        log "Unsupported DSCP value ($ipt_dscp) defined in the cfg file"
-        exit 1
-    fi
-
-    # Convert mark ID to hex
-    mark_id=$(dec_to_hex "$mark_id")
-
-    # Ensure only Client/Device IPs will be the basis for redirection (easier to look at when monitoring)
-    case "$direction" in 
-        INBOUND)
-            main_chain_ip="-d ${ipt_d}/32"
-            main_chain_port="--dport ${ipt_dp}"              
-            cust_chain_ip="-s ${ipt_s}/32"
-            cust_chain_port="--sport ${ipt_sp}"              
-            ;;
-        OUTBOUND)
-            main_chain_ip="-s ${ipt_s}/32"                   
-            main_chain_port="--sport ${ipt_sp}"               
-            cust_chain_ip="-d ${ipt_d}/32"          
-            cust_chain_port="--dport ${ipt_dp}"              
-            ;;            
-    esac
-
-    # Ensure custom chain is created and -j RETURN is always the last rule of the chain
-    if [ -n "$custom_chain" ]; then
-        if ! iptables-save -t mangle | grep -q "^:${custom_chain} " >/dev/null 2>&1; then
-            iptables -t mangle -N ${custom_chain}
-            iptables -t mangle -A ${custom_chain} -j RETURN
-            log "Custom chain ${custom_chain} created"
-        else
-            last_rule_in_chain=$(iptables-save -t mangle | grep -E "^\-A ${custom_chain}" | tail -n 1)
-            if [ "$last_rule_in_chain" != "-A ${custom_chain} -j RETURN" ];then
-                iptables -t mangle -D ${custom_chain} -j RETURN 2>/dev/null
-                iptables -t mangle -A ${custom_chain} -j RETURN
-                log "RETURN step missing in ${custom_chain}. Rule re-added!"
-            fi
-        fi
-    else
-        log "MISSING NCHAIN PARAMETER! Check config files. Execution cancelled!"
-        exit 1
-    fi
-
-    # Need to strickly follow the sequence of arguments for current clean-up logic to work
-    # FORWARD -s 192.168.2.10/32 -j STREAMING
-    ipt_r_spec1="${main_chain_ip} -j ${custom_chain}"
-    
-    set -- $(echo "$ipt_matchby" | awk '{print $1, $2}')    
-    match1="$1"
-    match2="$2"
-    match_id="0"
-
-    for m in "$match1" "$match2"; do
-        case "${m}" in
-            PORT)
-                match_id="$(( match_id + 1))"
-                ;;
-            IP)
-                match_id="$(( match_id + 2))"                
-                ;;
-        esac
-    done
-
-    # Need to strickly follow the sequence/order of arguments for current clean-up logic to work
-    # STREAMING -d 8.8.8.8/32 -p tcp -m tcp --sport 5223 --dport 49978 -j DSCP --set-dscp 0x28
-    case "$match_id" in
-        0|3)
-            ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j CONNMARK --set-xmark ${mark_id}/0xffffffff"
-            ;;        
-        1)
-            ipt_r_spec2="-p ${ipt_p} -m ${ipt_p} ${cust_chain_port} -j CONNMARK --set-xmark ${mark_id}/0xffffffff"        
-            ;;        
-        2)
-            ipt_r_spec2="${cust_chain_ip} -p ${ipt_p} -m ${ipt_p} -j CONNMARK --set-xmark ${mark_id}/0xffffffff"        
-            ;;
-        *)
-            log "ERROR in identifying match by"
-            exit 1
-            ;;
-    esac
-        
-    for chain in $chains; do        
-        ipt_main_chain="${chain}"
-        
-        ipt_main="$ipt_main_chain $ipt_r_spec1"
-        log "ipt_main=$ipt_main"
-
-        # Create redirection rules in main chain
-        rule_exist "$ipt_main"
-        rc="$?"
-        log "case1=$rc"
-        case "$rc" in 
-            0)
-                log "\nThis redirection rule already exists.. ignoring to avoid duplication\n"
-                ;;
-            1)
-                iptables -t mangle -A ${ipt_main}
-                log "\nRedirection rule created (${chain}) --> $ipt_main"
-                ;;
-            *)
-                log "\nError executing iptables-save -t mangle! ${ipt_main}\n"
-                ;;
-        esac
-        log "case1=$?"
-        ipt_custom="$custom_chain $ipt_r_spec2"
-        ipt_i_custom="$custom_chain 1 $ipt_r_spec2"
-        log "ipt_custom=$ipt_custom"
-
-        # Create handling rules in custom chain
-        rule_exist "$ipt_custom"
-        rc="$?"
-        log "case2=$rc"
-        case "$rc" in 
-            0)
-                log "\nThis handling rule already exists.. ignoring to avoid duplication\n"        
-                ;;
-            1)
-                iptables -t mangle -I ${ipt_i_custom}
-                log "\nHandling rule created (${custom_chain}) --> $ipt_i_custom"
-                ;;
-            *)
-                log "\nError executing iptables-save -t mangle! ${ipt_custom}\n"
-                ;;
-        esac
-        log "case2=$?"
-    done 
-}
-
-#######################################################################################
-# Extracts necessary parameters from the identified conntract connections and calls
-# create_mangle function to the create the iptable rules
-#######################################################################################
-process_conntrack () {
+update_conntrack () {
     conns="$1"
     dscp="$2"   
-    mark_in_chain="$3"
-    handling_chain="$4"
-    match_by="$5"
+    
+    new_mark=$(grep -F "${dscp}" "$DIR_CONN_TMP/dscp.map" | awk '{print $1}')
 
-    tgt_chain_in="$mark_in_chain"
-    tgt_chain_out="$mark_in_chain"
-   
+    log "dscp $dscp maps to mark id $new_mark"
+
     echo "$conns" | while read -r conn; do
         set -- $(echo "$conn" | awk '{print $1, $2, $3, $4, $5, $6, $7, $8, $9}')
-        conn_protocol="$9"
-        clientIP=$(extract_value "$1")
-        remoteIP=$(extract_value "$2")
-        clientPort=$(extract_value "$3")
-        remotePort=$(extract_value "$4")
-        in_remoteIP=$(extract_value "$5")
-        in_clientIP=$(extract_value "$6")
-        in_remotePort=$(extract_value "$7")
-        in_clientPort=$(extract_value "$8")
-
-        if [ -n "$tgt_chain_out" ]; then
-            create_mangle "$tgt_chain_out" "$handling_chain" "$conn_protocol" "$clientIP" "$remoteIP" "$clientPort" "$remotePort" "$match_by" "$dscp" "OUTBOUND"       
-        fi
-
-        if [ -n "$tgt_chain_in" ]; then
-            create_mangle "$tgt_chain_in" "$handling_chain" "$conn_protocol" "$remoteIP" "$clientIP" "$remotePort" "$clientPort" "$match_by" "$dscp" "INBOUND"
-        fi
+        conn_protocol="$1"
+        clientIP=$(extract_value "$2")
+        remoteIP=$(extract_value "$3")
+        clientPort=$(extract_value "$4")
+        remotePort=$(extract_value "$5")
+        in_remoteIP=$(extract_value "$6")
+        in_clientIP=$(extract_value "$7")
+        in_remotePort=$(extract_value "$8")
+        in_clientPort=$(extract_value "$9")        
+                
+        # Update conntrack entry
+        update_stat=$(conntrack -U -p "${conn_protocol}" -u ASSURED -s "${clientIP}" --sport "${clientPort}" -d "${remoteIP}" --dport "${remotePort}" --mark "${new_mark}" 2>&1)
+        
+        log "${update_stat}"
     done 
 }
 
@@ -722,7 +479,7 @@ if  ! tc filter show dev eth0 | grep -q "protocol ip pref 10 u32 chain 0"; then
 fi
 
 # Make conntract keep entries longer
-connTO="90" #default is 30
+connTO="60" #default is 30
 if [ "$(cat /proc/sys/net/netfilter/nf_conntrack_udp_timeout)" -lt "$connTO" ]; then 
     echo "$connTO" > /proc/sys/net/netfilter/nf_conntrack_udp_timeout
     log "\n\nCONNTRACK UDP TIMEOUT UPDATED TO $connTO SECONDS\n"
@@ -731,7 +488,7 @@ fi
 # Prepare a priority map for supported DSCP values
 build_dscp_priority_map
 
-# Process config files
+# Process config files and filter conntrack based from the matching rules from the config files
 for file in $DIR_CONN_CFG/*.cfg; do
     log "Processing $file"
     # Clear generated regex files every time a new cfg is being processed
@@ -739,11 +496,11 @@ for file in $DIR_CONN_CFG/*.cfg; do
     # Ensure any newly uploaded config is in unix format
     dos2unix $file
     
-    process_config $file
+    build_filter_from_cfg $file
 done
 
 # Restore mark from conntrack and retag DSCP
-restore_mark
+restore_mark_and_set_dscp
 
 # Perform iptables clean-up
 iptables-save -t mangle | grep -E "\-A [a-zA-Z]+" | sed 's/^-A //' | grep -v " -j RETURN$" > "$DIR_CONN_TMP/all.ipt"
