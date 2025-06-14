@@ -120,12 +120,8 @@ esc_dot () {
 # Clears temporary iptable files
 #######################################################################################
 clear_tmp_files () {
-    > "$DIR_CONN_TMP/curr.ipt"
-    > "$DIR_CONN_TMP/all.ipt"
-    > "$DIR_CONN_TMP/del.ipt"
     > "$DIR_CONN_TMP/dscp.ipt"
     > "$DIR_CONN_TMP/dscp.map"
-    > "$DIR_CONN_TMP/del_ipt.sh"
     > "$DIR_CONN_TMP/connt.tmp"        
 }
 
@@ -155,7 +151,9 @@ ip_to_regex_range () {
     cidr="$2"
 
     ipcalc="$DIR_CONN/ipcalc.sh"
-    regx_ip_rng="$DIR_CONN/ip2regex.sh"
+
+    # This will be installed from https://github.com/SlashUsrVin/IP2Regex-Shell
+    regx_ip_rng="$DIR_CONN/ip2regex.sh" 
 
     # Check if notation exists, if so, convert to ip ranges and generate regex
     if [ -n "$cidr" ]; then
@@ -357,20 +355,6 @@ build_filter_from_cfg () {
 }
 
 #######################################################################################
-# Writes unique rule to curr.ipt for active connections
-#######################################################################################
-write_to_ipt () {
-    ipt_str="$1"
-
-    ipt_file="$DIR_CONN_TMP/curr.ipt"
-      
-    if ! grep -Fxq -- "$ipt_str" "$ipt_file"; then
-        echo "$ipt_str" >> "$ipt_file"
-        log "\nipt written...\n"
-    fi
-}
-
-#######################################################################################
 # Checks rules existence using iptables-mangle 
 #######################################################################################
 check_rule () {
@@ -382,9 +366,7 @@ check_rule () {
 }
 
 #######################################################################################
-# Validates a rule and add to curr.ipt. This ensures that only active       
-# connections based from conntrack will have the iptable rules created                
-# curr.ipt is also referenced for deleting iptable rules that are already inactive
+# Check rules existence and avoid duplication
 #######################################################################################
 rule_exist () {
     rule="$1"
@@ -392,15 +374,11 @@ rule_exist () {
     check_rule "$rule"
     rc_chk="$?"
 
-    if [ "$rc_chk" -le 1 ]; then
-        write_to_ipt "$rule"
-    fi
-
     return "$rc_chk"
 }
 
 #######################################################################################
-# Restore Mark from conntrack and retag DSCP
+# Restore Mark from conntrack and retag DSCP via iptables mangle rules
 #######################################################################################
 restore_mark_and_set_dscp () {
     while read -r dscp_mapping; do
@@ -415,30 +393,40 @@ restore_mark_and_set_dscp () {
     sort -grk 5 "$DIR_CONN_TMP/dscp.ipt" -o "$DIR_CONN_TMP/dscp.ipt"
 
     # DSCP tagging rule for active connections to reduce clutter in the mangle table
+    log "DSCP reclassification rules created (from highest to lowest priority):"
     while read -r restore_cmd; do
         ipt_restore_pre="${restore_cmd}"
-
-        log "ipt_restore_pre=$ipt_restore_pre"
+        
         if ! rule_exist "${ipt_restore_pre}"; then
             iptables -t mangle -A ${ipt_restore_pre}
+            log "$ipt_restore_pre"
         fi
     done < "$DIR_CONN_TMP/dscp.ipt"
 
     # Ensure restore rule is always the first rule in PREROUTING chain
     restore_rule="PREROUTING -m mark --mark 0x0 -j CONNMARK --restore-mark --nfmask 0xffffffff --ctmask 0xffffffff"
-    if ! rule_exist "${restore_rule}"; then
-        first_pre_rule=$(iptables-save -t mangle | grep -E "\-A PREROUTING.*" | head -n 1 | grep -oE "PREROUTING.*")
-        if [ "$first_pre_rule" != "$restore_rule" ]; then
-            iptables -t mangle -D ${restore_rule} 2>/dev/null
-        fi
+    
+    prerouting_rule=$(iptables-save -t mangle | grep "A PREROUTING" | awk '{print NR, $0}')
+    # Incase restore rules are inserted multiple times to different positions, tail -n 1 will auto-correct it as the script runs a few times.
+    restore_rule_pos=$(echo "$prerouting_rule" | grep -F "$restore_rule" | tail -n 1) 
+    rule_seq=$(echo "$restore_rule_pos" | awk '{print $1}')
+    rule_seq=${rule_seq:-0}
+
+    if [ "$rule_seq" -gt 1 ]; then
+        iptables -t mangle -D ${restore_rule} 2>/dev/null
+        log "Deleted connmark restore mark rule due to incorrect position ($rule_seq) in the mangle table"
+    fi
+
+    if ! rule_exist "${restore_rule}" && [ "$rule_seq" -ne 1 ]; then        
         restore_ins_cmd=$(echo "$restore_rule" | sed 's/PREROUTING/PREROUTING 1/') # Sequence 1
         iptables -t mangle -I ${restore_rule}
+        log "Inserted connmark restore mark rule at the first position in the mangle table"
+        log "${restore_rule}"
     fi
 }
 
 #######################################################################################
 # Update conntrack with mark based from dscp mapping
-# 
 #######################################################################################
 update_conntrack () {
     conns="$1"
@@ -501,18 +489,6 @@ done
 
 # Restore mark from conntrack and retag DSCP
 restore_mark_and_set_dscp
-
-# Perform iptables clean-up
-iptables-save -t mangle | grep -E "\-A [a-zA-Z]+" | sed 's/^-A //' | grep -v " -j RETURN$" > "$DIR_CONN_TMP/all.ipt"
-grep -Fxvf "$DIR_CONN_TMP/curr.ipt" "$DIR_CONN_TMP/all.ipt" > "$DIR_CONN_TMP/del.ipt"
-del_count=$(wc -l < "$DIR_CONN_TMP/del.ipt")
-log "Current Active Rules:\n$(cat $DIR_CONN_TMP/curr.ipt)\nAll Rules in Mangle:\n$(cat $DIR_CONN_TMP/all.ipt)"
-if [ "$del_count" -gt 0 ]; then
-    sed 's/^/iptables -t mangle -D /' "$DIR_CONN_TMP/del.ipt" > "$DIR_CONN_TMP/del_ipt.sh"
-    chmod +x "$DIR_CONN_TMP/del_ipt.sh"
-    "$DIR_CONN_TMP/del_ipt.sh"
-    log "RULES DELETED (clean-up):\n$(cat "$DIR_CONN_TMP/del.ipt")\n"
-fi
 
 # Clear temporary files
 clear_tmp_files
